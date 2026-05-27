@@ -135,6 +135,7 @@ export class SwampScene extends Phaser.Scene {
     this.load.on('loaderror', (_file: unknown) => { /* ignore */ })
     // Original Egor-style v1 sprites
     this.load.image('yoda_idle',   '/sprites/v4/yoda_idle_v4.png')
+    this.load.image('yoda_idle_b', '/sprites/v4/yoda_idle_b_v4.png')
     // V2 painted assets (Stage 2 — Gemini-generated, Egor-style)
     this.load.image('yoda_jump',   '/sprites/v4/yoda_jump_v4.png')
     this.load.image('yoda_hit',    '/sprites/v4/yoda_hit_v4.png')
@@ -831,7 +832,10 @@ export class SwampScene extends Phaser.Scene {
     const px = p.x - PW / 2
     // Apply bob offset for idle run; anchor bottom to state position
     const bobY = p.anim === 'running' ? -this.bobOffset : 0
-    const py = p.screenY - (PH - PLAYER_HEIGHT) + bobY
+    // Sprite alpha bbox has empty padding below the planted foot when other foot is lifted;
+    // compensate so the planted foot visually touches ground.
+    const groundOffset = p.anim === 'running' ? PH * 0.08 : 0
+    const py = p.screenY - (PH - PLAYER_HEIGHT) + bobY + groundOffset
 
     // Shield
     if (p.shieldActive) {
@@ -844,6 +848,11 @@ export class SwampScene extends Phaser.Scene {
 
     if (this.playerImg) {
       const angle = p.anim === 'jumping' ? (p.vy < 0 ? -12 : 8) : 0
+      // Walk-cycle frame swap: alternate idle/idle_b every 0.18s while running
+      if (p.anim === 'running' && this.textures.exists('yoda_idle_b')) {
+        const frame = Math.floor(this.gs.gameTime / 0.18) % 2 === 0 ? 'yoda_idle' : 'yoda_idle_b'
+        if (this.playerImg.texture.key !== frame) this.playerImg.setTexture(frame)
+      }
       this.playerImg
         .setVisible(true)
         .setPosition(px, py)
