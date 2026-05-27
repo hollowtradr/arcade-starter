@@ -534,6 +534,10 @@ export class SwampScene extends Phaser.Scene {
     const bandHeight = screenH - gY + 8
     if (!this.groundTile) {
       this.groundTile = this.add.tileSprite(0, gY - 4, w, bandHeight, 'ground_v2')
+      // Scale down the painted ground texture so its painted reeds/details aren't giant.
+      // tileScaleY < 1 makes the texture appear smaller (more tiles vertically per band).
+      this.groundTile.tileScaleX = 0.6
+      this.groundTile.tileScaleY = 0.5
         .setOrigin(0, 0)
         .setDepth(1.0)  // above sky, below trees
     }
