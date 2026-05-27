@@ -12,10 +12,10 @@
 }
 
 :root {
-  /* Swamp palette */
-  --swamp-deep:    #0d1a10;
-  --swamp-mid:     #1a3d22;
-  --swamp-mist:    #2e5a30;
+  /* Swamp palette — Egor whimsy: warm daylight swamp, not noir */
+  --swamp-deep:    #1a3320;
+  --swamp-mid:     #2d5a30;
+  --swamp-mist:    #4a8a4a;
   --mud-dark:      #2a1a0a;
   --mud-mid:       #4a3010;
   --parchment:     #f0dca0;
@@ -24,11 +24,11 @@
   --ink:           #2a1a0a;
 
   /* Keep arcade vars for components we inherit */
-  --bg:          #0d1a10;
-  --surface:     #1a2a1a;
-  --surface-2:   #243824;
-  --accent:      #4a8a28;
-  --accent-glow: #7aba40;
+  --bg:          #1a3320;
+  --surface:     #2a4a2a;
+  --surface-2:   #345834;
+  --accent:      #6aaa38;
+  --accent-glow: #aaea60;
   --gold:        #d4a820;
   --silver:      #90a878;
   --text:        #e8f0e0;
@@ -88,14 +88,15 @@ html, body {
 .title-bg {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, #0d1a10 0%, #162b1a 45%, #1a3d22 70%, #1e3d28 100%);
+  /* Warmer daylight swamp — dawn sky into sunlit canopy */
+  background: linear-gradient(180deg, #d4b878 0%, #a8c870 25%, #5a8a40 55%, #2d5a30 100%);
 }
 
 .title-mist {
   position: absolute;
   left: 0; right: 0;
   height: 120px;
-  background: radial-gradient(ellipse at 50% 100%, rgba(180,220,160,0.12), transparent 70%);
+  background: radial-gradient(ellipse at 50% 100%, rgba(220,240,180,0.25), transparent 70%);
   pointer-events: none;
 }
 
@@ -109,7 +110,8 @@ html, body {
   flex-direction: column;
   align-items: center;
   gap: 14px;
-  padding: 0 24px 32px;
+  /* iOS Safari bottom bar can be 80-120px tall — pad generously. */
+  padding: 0 24px max(120px, calc(env(safe-area-inset-bottom) + 80px));
   width: 100%;
   max-width: 420px;
 }
@@ -347,7 +349,7 @@ html, body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(13, 26, 16, 0.96);
+  background: rgba(26, 51, 32, 0.94);
   backdrop-filter: blur(10px);
   z-index: 20;
   overflow-y: auto;
@@ -356,7 +358,8 @@ html, body {
 .result-scroll {
   width: 100%;
   max-width: 400px;
-  padding: 20px 20px 32px;
+  /* iOS Safari bottom bar can be 80-120px tall — pad generously and respect safe-area. */
+  padding: 20px 20px max(120px, calc(env(safe-area-inset-bottom) + 80px));
 }
 
 .result-scroll-inner {

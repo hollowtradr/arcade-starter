@@ -112,11 +112,12 @@ export function renderFrame(state: GameState, sprites: Sprites, dt: number): voi
 function drawBackground(w: number, h: number, groundY: number, worldOffset: number): void {
   if (!_ctx) return
 
-  // Sky gradient (dark swamp green)
+  // Sky gradient — warm daylight Dagobah (Egor whimsy, not noir)
   const sky = _ctx.createLinearGradient(0, 0, 0, groundY)
-  sky.addColorStop(0, '#0d1a10')
-  sky.addColorStop(0.6, '#162b1a')
-  sky.addColorStop(1, '#1e3d22')
+  sky.addColorStop(0, '#c8d898')   // warm hazy dawn sky
+  sky.addColorStop(0.4, '#7aaa58') // sunlit canopy
+  sky.addColorStop(0.8, '#3a6a2a') // deep forest floor
+  sky.addColorStop(1, '#2a5a22')   // ground-level shadow
   _ctx.fillStyle = sky
   _ctx.fillRect(0, 0, w, groundY)
 
@@ -134,13 +135,13 @@ function drawBackground(w: number, h: number, groundY: number, worldOffset: numb
 
   // Background trees (slow parallax: 20% of scroll)
   const bgOffset = (worldOffset * 0.20) % w
-  drawTreeLayer(_ctx, BG_TREES, w, h, groundY, bgOffset, '#0e2212', 0.38, 0.15)
-  drawTreeLayer(_ctx, BG_TREES, w, h, groundY, bgOffset - w, '#0e2212', 0.38, 0.15)
+  drawTreeLayer(_ctx, BG_TREES, w, h, groundY, bgOffset, '#2a5a28', 0.38, 0.15)
+  drawTreeLayer(_ctx, BG_TREES, w, h, groundY, bgOffset - w, '#2a5a28', 0.38, 0.15)
 
   // Foreground trees (faster parallax: 55% of scroll)
   const fgOffset = (worldOffset * 0.55) % w
-  drawTreeLayer(_ctx, FG_TREES, w, h, groundY, fgOffset, '#0a1a0d', 0.15, 0.12)
-  drawTreeLayer(_ctx, FG_TREES, w, h, groundY, fgOffset - w, '#0a1a0d', 0.15, 0.12)
+  drawTreeLayer(_ctx, FG_TREES, w, h, groundY, fgOffset, '#1a4a1a', 0.15, 0.12)
+  drawTreeLayer(_ctx, FG_TREES, w, h, groundY, fgOffset - w, '#1a4a1a', 0.15, 0.12)
 
   // Firefly particles (deterministic from worldOffset)
   drawFireflies(_ctx, w, groundY, worldOffset)
@@ -213,9 +214,9 @@ function drawGround(w: number, h: number, groundY: number, worldOffset: number):
 
   // Water / swamp beneath ground
   const water = _ctx.createLinearGradient(0, groundY, 0, h)
-  water.addColorStop(0, '#1a3d2a')
-  water.addColorStop(0.3, '#163321')
-  water.addColorStop(1, '#0d1f18')
+  water.addColorStop(0, '#3a7a48')
+  water.addColorStop(0.3, '#2a6a38')
+  water.addColorStop(1, '#1a4a28')
   _ctx.fillStyle = water
   _ctx.fillRect(0, groundY, w, h - groundY)
 
@@ -237,9 +238,9 @@ function drawGround(w: number, h: number, groundY: number, worldOffset: number):
 
   // Ground strip (mud/moss)
   const groundGrad = _ctx.createLinearGradient(0, groundY - 8, 0, groundY + 16)
-  groundGrad.addColorStop(0, '#3d5e2a')
-  groundGrad.addColorStop(0.4, '#2e4a1e')
-  groundGrad.addColorStop(1, '#1a3d2a')
+  groundGrad.addColorStop(0, '#5a8a38')
+  groundGrad.addColorStop(0.4, '#4a7a2a')
+  groundGrad.addColorStop(1, '#3a6a28')
   _ctx.fillStyle = groundGrad
   _ctx.fillRect(0, groundY - 8, w, 24)
 
