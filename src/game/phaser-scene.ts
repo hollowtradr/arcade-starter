@@ -115,6 +115,9 @@ export class SwampScene extends Phaser.Scene {
   // V2 painted obstacle / pickup sprite pools
   private obstaclePool: Map<string, Phaser.GameObjects.Image[]> = new Map()
 
+  // V2 painted ground tile sprite
+  private groundTile: Phaser.GameObjects.TileSprite | null = null
+
   constructor() { super({ key: 'SwampScene' }) }
 
   // ── Phaser lifecycle ──────────────────────────────────────────────────────
@@ -149,6 +152,7 @@ export class SwampScene extends Phaser.Scene {
     this.load.image('tree_near_v2','/sprites/v2/tree_near_v2.png')
     this.load.image('mushroom_v2', '/sprites/v2/mushroom_v2.png')
     this.load.image('reed_v2',     '/sprites/v2/reed_v2.png')
+    this.load.image('ground_v2',   '/sprites/v2/ground_v2.png')
   }
 
   create(): void {
@@ -165,7 +169,7 @@ export class SwampScene extends Phaser.Scene {
     if (this.textures.exists('yoda_idle')) {
       this.playerImg = this.add.image(0, 0, 'yoda_idle')
         .setOrigin(0, 0)
-        .setDisplaySize(PLAYER_WIDTH * 1.5, PLAYER_HEIGHT * 1.5)
+        .setDisplaySize(PLAYER_WIDTH * 2.0, PLAYER_HEIGHT * 2.0)
         .setDepth(3)
         .setVisible(false)
     }
@@ -292,7 +296,12 @@ export class SwampScene extends Phaser.Scene {
 
     // Render layers
     this.renderBackground(w, h)
-    this.renderGround(w, h)
+    // Painted ground tile if available; falls back to procedural Graphics ground
+    if (this.textures.exists('ground_v2')) {
+      this.renderPaintedGround(w, this.gs.groundY, h)
+    } else {
+      this.renderGround(w, h)
+    }
     this.renderEntities(w, h)
     this.renderPlayer()
     this.renderHUD(w, h)
@@ -390,45 +399,77 @@ export class SwampScene extends Phaser.Scene {
 
   /**
    * Render painted tree layers using v2 sprites positioned by world offset.
-   * Three depth layers with 0.2 / 0.45 / 0.7 parallax scroll rates.
+   * Three depth layers. Trees are much smaller now (~40% of previous), with
+   * randomized flip and y-jitter per slot so they don't read as repeating tile.
    */
   private renderPaintedTrees(w: number, gY: number): void {
-    const POOL = 6  // total trees per layer
-    const ensure = (arr: Phaser.GameObjects.Image[], texKey: string, depth: number) => {
+    const POOL = 8  // trees per layer (was 6)
+    const ensure = (arr: Phaser.GameObjects.Image[], texKey: string, depth: number, baseScaleY: number) => {
       if (arr.length === 0) {
         for (let i = 0; i < POOL; i++) {
           const img = this.add.image(0, 0, texKey).setOrigin(0.5, 1).setDepth(depth)
+          // Per-slot variation: random horizontal flip, random subtle vertical jitter,
+          // random slight scale (±15%) so the parallax doesn't read as identical tiles
+          const flip = (i * 37) % 7 < 3 ? -1 : 1
+          const scaleVariation = 0.85 + ((i * 43) % 30) / 100  // 0.85 - 1.15
+          const yJitter = ((i * 17) % 11) - 5  // -5 to +5 px
+          img.setData('flip', flip)
+          img.setData('scaleY', baseScaleY * scaleVariation)
+          img.setData('yJitter', yJitter)
           arr.push(img)
         }
       }
     }
-    ensure(this.treeFarSprites,  'tree_far_v2',  0.5)
-    ensure(this.treeMidSprites,  'tree_mid_v2',  0.7)
-    ensure(this.treeNearSprites, 'tree_near_v2', 0.9)
+    // baseScaleY = visual height as % of screen height; far layer is small/distant, near layer big/foreground
+    ensure(this.treeFarSprites,  'tree_far_v2',  0.5, 0.35)
+    ensure(this.treeMidSprites,  'tree_mid_v2',  0.7, 0.45)
+    ensure(this.treeNearSprites, 'tree_near_v2', 0.9, 0.60)
 
-    // Layer specs: [pool, parallax, baseHeight (px on screen), tint, vertical anchor]
-    const layers: Array<[Phaser.GameObjects.Image[], number, number, number, number]> = [
-      [this.treeFarSprites,  0.20, gY * 0.95, 0xc8d8a0, gY + 4],   // farthest, pale, anchored slightly below ground line
-      [this.treeMidSprites,  0.45, gY * 1.05, 0xffffff, gY + 8],   // mid
-      [this.treeNearSprites, 0.70, gY * 1.20, 0xffffff, gY + 14],  // nearest, biggest
+    const screenH = this.scale.height
+    // Layer specs: [pool, parallax-rate, vertical-anchor (Y px), tint]
+    const layers: Array<[Phaser.GameObjects.Image[], number, number, number]> = [
+      [this.treeFarSprites,  0.15, gY * 0.92, 0xb8c898],   // farthest: pale, mostly above ground line
+      [this.treeMidSprites,  0.40, gY * 1.00, 0xe8f0d0],   // mid: still washed
+      [this.treeNearSprites, 0.70, gY + 8,   0xffffff],   // near: full color, anchored on ground
     ]
-    const spacing = w / 2.5
+    // Spacing: wider so trees feel like discrete plants rather than wallpaper
+    const spacing = w * 0.65
 
-    for (const [pool, parallax, height, tint, anchorY] of layers) {
+    for (const [pool, parallax, anchorY, tint] of layers) {
       const off = this.gs.worldOffset * parallax
+      const span = pool.length * spacing
       for (let i = 0; i < pool.length; i++) {
         const baseX = i * spacing
-        // Wrap horizontally: shift by world offset, modulo (pool.length * spacing)
-        const span = pool.length * spacing
         let x = baseX - (off % span)
         if (x < -spacing) x += span
         if (x > w + spacing) x -= span
         const img = pool[i]
-        img.setPosition(x, anchorY)
-        img.setDisplaySize(height * 0.55, height)
+        const scaleY = img.getData('scaleY') as number
+        const flip = img.getData('flip') as number
+        const yJitter = img.getData('yJitter') as number
+        const targetHeight = screenH * scaleY
+        img.setPosition(x, anchorY + yJitter)
+        img.setDisplaySize(targetHeight * 0.55 * flip, targetHeight)
         img.setTint(tint)
       }
     }
+  }
+
+  /**
+   * Render a painted ground tile band that scrolls with the world.
+   * Replaces the flat solid-color ground strip with painted swamp ground.
+   */
+  private renderPaintedGround(w: number, gY: number, screenH: number): void {
+    const bandHeight = screenH - gY + 8
+    if (!this.groundTile) {
+      this.groundTile = this.add.tileSprite(0, gY - 4, w, bandHeight, 'ground_v2')
+        .setOrigin(0, 0)
+        .setDepth(1.0)  // above sky, below trees
+    }
+    // Scroll the tile horizontally with the world (ground moves at 100% rate)
+    this.groundTile.tilePositionX = this.gs.worldOffset
+    this.groundTile.setSize(w, bandHeight)
+    this.groundTile.setPosition(0, gY - 4)
   }
 
   private drawTreeLayer(
@@ -713,7 +754,7 @@ export class SwampScene extends Phaser.Scene {
   private renderPlayer(): void {
     const g = this.playerGfx; g.clear()
     const p = this.gs.player
-    const PW = PLAYER_WIDTH * 1.5, PH = PLAYER_HEIGHT * 1.5
+    const PW = PLAYER_WIDTH * 2.0, PH = PLAYER_HEIGHT * 2.0
     const px = p.x - PW / 2
     // Apply bob offset for idle run; anchor bottom to state position
     const bobY = p.anim === 'running' ? -this.bobOffset : 0
