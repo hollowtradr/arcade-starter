@@ -447,8 +447,9 @@ export class SwampScene extends Phaser.Scene {
       const span = pool.length * layerSpacing
       for (let i = 0; i < pool.length; i++) {
         const baseX = i * layerSpacing
-        let x = baseX - (off % span)
-        if (x < -layerSpacing) x += span
+        // Proper modulo wrap: always in [0, span), then shift so trees can appear both sides of viewport
+        let x = ((baseX - (off % span)) % span + span) % span
+        // Shift so trees fill viewport: if too far right (off-screen), wrap to left side
         if (x > w + layerSpacing) x -= span
         const img = pool[i]
         const scaleY = img.getData('scaleY') as number
