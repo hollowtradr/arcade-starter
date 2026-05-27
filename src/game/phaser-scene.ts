@@ -403,16 +403,23 @@ export class SwampScene extends Phaser.Scene {
    * randomized flip and y-jitter per slot so they don't read as repeating tile.
    */
   private renderPaintedTrees(w: number, gY: number): void {
-    const POOL = 8  // trees per layer (was 6)
-    const ensure = (arr: Phaser.GameObjects.Image[], texKey: string, depth: number, baseScaleY: number) => {
+    // Pool sizes and spacings chosen so trees always fill the viewport:
+    // spacing < screenWidth guarantees continuous coverage without gaps
+    const FAR_POOL  = 9,  FAR_SPACING  = Math.round(w * 0.40)   // ~2.5 far trees always visible
+    const MID_POOL  = 6,  MID_SPACING  = Math.round(w * 0.60)   // ~1.7 mid trees visible
+    const NEAR_POOL = 5,  NEAR_SPACING = Math.round(w * 0.85)   // ~1.2 near trees visible
+
+    const ensurePool = (
+      arr: Phaser.GameObjects.Image[], texKey: string,
+      depth: number, baseScaleY: number, poolSize: number,
+    ) => {
       if (arr.length === 0) {
-        for (let i = 0; i < POOL; i++) {
+        for (let i = 0; i < poolSize; i++) {
           const img = this.add.image(0, 0, texKey).setOrigin(0.5, 1).setDepth(depth)
-          // Per-slot variation: random horizontal flip, random subtle vertical jitter,
-          // random slight scale (±15%) so the parallax doesn't read as identical tiles
+          // Per-slot variation: alternating flip, scale ±15%, y-jitter
           const flip = (i * 37) % 7 < 3 ? -1 : 1
-          const scaleVariation = 0.85 + ((i * 43) % 30) / 100  // 0.85 - 1.15
-          const yJitter = ((i * 17) % 11) - 5  // -5 to +5 px
+          const scaleVariation = 0.88 + ((i * 43) % 25) / 100  // 0.88–1.13
+          const yJitter = ((i * 17) % 13) - 6  // -6 to +6 px
           img.setData('flip', flip)
           img.setData('scaleY', baseScaleY * scaleVariation)
           img.setData('yJitter', yJitter)
@@ -420,45 +427,41 @@ export class SwampScene extends Phaser.Scene {
         }
       }
     }
-    // baseScaleY = visual height as % of screen height; far=tiny/distant, near=medium/foreground
-    // Sizes intentionally modest so Grogu reads as the main character, not a sprite in a forest
-    ensure(this.treeFarSprites,  'tree_far_v2',  0.5, 0.16)
-    ensure(this.treeMidSprites,  'tree_mid_v2',  0.7, 0.24)
-    ensure(this.treeNearSprites, 'tree_near_v2', 0.9, 0.34)
+
+    ensurePool(this.treeFarSprites,  'tree_far_v2',  0.5, 0.20, FAR_POOL)   // 20% screen height, ~6 visible
+    ensurePool(this.treeMidSprites,  'tree_mid_v2',  0.7, 0.30, MID_POOL)   // 30% screen height, ~3 visible
+    ensurePool(this.treeNearSprites, 'tree_near_v2', 0.9, 0.40, NEAR_POOL)  // 40% screen height, ~1.5 visible
 
     const screenH = this.scale.height
-    // Layer specs: [pool, parallax-rate, vertical-anchor (Y px), tint]
-    const layers: Array<[Phaser.GameObjects.Image[], number, number, number]> = [
-      [this.treeFarSprites,  0.15, gY * 0.95, 0xa0b880],   // farthest: muted, above ground line
-      [this.treeMidSprites,  0.40, gY * 1.00, 0xd8e8c0],   // mid: lightly washed
-      [this.treeNearSprites, 0.70, gY + 4,   0xffffff],   // near: full color, anchored on ground
-    ]
-    // Spacing: wider gaps so trees read as individual plants not wallpaper
-    // Far trees: very spread out; near trees: occasional accent
-    const spacingFar  = w * 1.30
-    const spacingMid  = w * 1.00
-    const spacingNear = w * 1.50
 
-    const spacings = [spacingFar, spacingMid, spacingNear]
-    for (let li = 0; li < layers.length; li++) {
-      const [pool, parallax, anchorY, tint] = layers[li]
-      const layerSpacing = spacings[li]
+    // [sprites, parallaxRate, anchorY, tint, spacing, poolSize]
+    type LayerSpec = [Phaser.GameObjects.Image[], number, number, number, number, number]
+    const layers: LayerSpec[] = [
+      [this.treeFarSprites,  0.15, gY * 0.95, 0xa8c090, FAR_SPACING,  FAR_POOL],
+      [this.treeMidSprites,  0.40, gY * 0.99, 0xd8ecc0, MID_SPACING,  MID_POOL],
+      [this.treeNearSprites, 0.70, gY + 4,   0xffffff, NEAR_SPACING, NEAR_POOL],
+    ]
+
+    for (const [pool, parallax, anchorY, tint, spacing, poolSize] of layers) {
       const off = this.gs.worldOffset * parallax
-      const span = pool.length * layerSpacing
-      for (let i = 0; i < pool.length; i++) {
-        const baseX = i * layerSpacing
-        // Proper modulo wrap: always in [0, span), then shift so trees can appear both sides of viewport
+      const span = poolSize * spacing
+      for (let i = 0; i < poolSize; i++) {
+        // Wrap tree position into screen-covering range
+        // ((baseX - off) % span) gives position in [-span, span]; normalize to [0, span)
+        const baseX = i * spacing
         let x = ((baseX - (off % span)) % span + span) % span
-        // Shift so trees fill viewport: if too far right (off-screen), wrap to left side
-        if (x > w + layerSpacing) x -= span
+        // Shift from [0,span) to [-spacing, span-spacing] so trees appear on both sides
+        if (x > span - spacing / 2) x -= span
+        // Cull if still off-screen
+        if (x < -spacing || x > w + spacing) continue
+
         const img = pool[i]
         const scaleY = img.getData('scaleY') as number
-        const flip = img.getData('flip') as number
+        const flip   = img.getData('flip')   as number
         const yJitter = img.getData('yJitter') as number
         const targetHeight = screenH * scaleY
         img.setPosition(x, anchorY + yJitter)
-        // Aspect ratio: tree images are roughly 1:2 (wide:tall), use 0.50 width ratio
-        img.setDisplaySize(targetHeight * 0.50 * flip, targetHeight)
+        img.setDisplaySize(targetHeight * 0.48 * flip, targetHeight)
         img.setTint(tint)
       }
     }
