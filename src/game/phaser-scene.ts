@@ -434,15 +434,55 @@ export class SwampScene extends Phaser.Scene {
     const gY = this.gs.groundY
     const t = this.biomeTint
 
-    // Sky bands (3 horizontal strips approximating a gradient)
-    g.fillStyle(lerp(DAY.skyTop, TWIL.skyTop, t), 1); g.fillRect(0, 0, w, gY * 0.4)
-    g.fillStyle(lerp(DAY.skyMid, TWIL.skyMid, t), 1); g.fillRect(0, gY * 0.4, w, gY * 0.4)
-    g.fillStyle(lerp(DAY.skyLow, TWIL.skyLow, t), 1); g.fillRect(0, gY * 0.8, w, gY * 0.22)
+    // Smooth sky gradient via many thin bands (no hard seams)
+    const STEPS = 24
+    for (let i = 0; i < STEPS; i++) {
+      const f = i / (STEPS - 1)
+      // Interpolate: top -> mid -> low across the band
+      let r: number, gC: number, b: number
+      if (f < 0.5) {
+        const k = f / 0.5
+        const top = lerp(DAY.skyTop, TWIL.skyTop, t)
+        const mid = lerp(DAY.skyMid, TWIL.skyMid, t)
+        r = lerp((top >> 16) & 0xff, (mid >> 16) & 0xff, k)
+        gC = lerp((top >> 8) & 0xff, (mid >> 8) & 0xff, k)
+        b = lerp(top & 0xff, mid & 0xff, k)
+      } else {
+        const k = (f - 0.5) / 0.5
+        const mid = lerp(DAY.skyMid, TWIL.skyMid, t)
+        const low = lerp(DAY.skyLow, TWIL.skyLow, t)
+        r = lerp((mid >> 16) & 0xff, (low >> 16) & 0xff, k)
+        gC = lerp((mid >> 8) & 0xff, (low >> 8) & 0xff, k)
+        b = lerp(mid & 0xff, low & 0xff, k)
+      }
+      const color = (Math.round(r) << 16) | (Math.round(gC) << 8) | Math.round(b)
+      const y0 = Math.floor((i / STEPS) * gY * 1.02)
+      const y1 = Math.ceil(((i + 1) / STEPS) * gY * 1.02)
+      g.fillStyle(color, 1)
+      g.fillRect(0, y0, w, y1 - y0 + 1)
+    }
 
-    // Mist bands
-    g.fillStyle(0xb4dcb4, 0.055); g.fillRect(0, gY * 0.52, w, 50)
-    g.fillStyle(0xb4dcb4, 0.040); g.fillRect(0, gY * 0.64, w, 50)
-    g.fillStyle(0xb4dcb4, 0.025); g.fillRect(0, gY * 0.76, w, 50)
+    // Soft mist cloud puffs scattered through the upper sky to fill empty space
+    const mistOff = (this.gs.worldOffset * 0.08) % (w * 2)
+    for (let i = 0; i < 8; i++) {
+      const seed = i * 53.7
+      const baseX = (seed * 127) % (w * 2)
+      let cx = baseX - mistOff
+      if (cx < -120) cx += w * 2
+      if (cx > w + 120) cx -= w * 2
+      const cy = gY * (0.05 + (seed * 0.31) % 0.35)
+      const cw = 80 + (seed * 17) % 60
+      const ch = 20 + (seed * 11) % 14
+      g.fillStyle(0xfff4d8, 0.18)
+      g.fillEllipse(cx, cy, cw, ch)
+      g.fillStyle(0xfff4d8, 0.10)
+      g.fillEllipse(cx + cw * 0.25, cy + 4, cw * 0.7, ch * 0.85)
+    }
+
+    // Mist bands (horizontal atmospheric haze)
+    g.fillStyle(0xb4dcb4, 0.075); g.fillRect(0, gY * 0.52, w, 50)
+    g.fillStyle(0xb4dcb4, 0.055); g.fillRect(0, gY * 0.64, w, 50)
+    g.fillStyle(0xb4dcb4, 0.035); g.fillRect(0, gY * 0.76, w, 50)
 
     // Use painted tree sprites if loaded (Stage 2); fallback to triangle silhouettes
     if (this.textures.exists('tree_far_v2')) {
