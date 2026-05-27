@@ -19,6 +19,7 @@ export interface Player {
   onPlatformId: number | null
   jumpHoldMs: number   // ms pointer has been held (capped at MAX_JUMP_HOLD)
   isHoldingJump: boolean
+  doubleJumpAvailable: boolean  // true after first jump; set false after double-jump
   anim: PlayerAnim
   hitFlashTimer: number  // seconds of hit flash remaining
   shieldActive: boolean
@@ -152,6 +153,7 @@ export function createInitialState(canvasW: number, canvasH: number): GameState 
       onPlatformId: null,
       jumpHoldMs: 0,
       isHoldingJump: false,
+      doubleJumpAvailable: false,
       anim: 'running',
       hitFlashTimer: 0,
       shieldActive: false,

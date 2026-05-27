@@ -122,7 +122,7 @@ export function updatePhysics(state: GameState, dt: number, canvasW: number, _ca
         // Land on platform
         p.screenY = screenTopY - PLAYER_HEIGHT
         p.vy = 0
-        p.grounded = true
+        p.grounded = true; p.doubleJumpAvailable = false
         p.onPlatformId = pl.id
         p.anim = 'running'
         onSomePlatform = true
@@ -139,7 +139,7 @@ export function updatePhysics(state: GameState, dt: number, canvasW: number, _ca
         // Already on this platform
         p.screenY = screenTopY - PLAYER_HEIGHT
         p.vy = 0
-        p.grounded = true
+        p.grounded = true; p.doubleJumpAvailable = false
         p.onPlatformId = pl.id
         p.anim = 'running'
         onSomePlatform = true
@@ -183,7 +183,7 @@ export function updatePhysics(state: GameState, dt: number, canvasW: number, _ca
       // Just landed
       p.anim = 'running'
     }
-    p.grounded = true
+    p.grounded = true; p.doubleJumpAvailable = false
     p.onPlatformId = null
   } else if (!onSomePlatform) {
     p.grounded = false
@@ -317,9 +317,25 @@ export function updatePhysics(state: GameState, dt: number, canvasW: number, _ca
 
 // ── Jump ──────────────────────────────────────────────────────────────────────
 
+/**
+ * Jump mechanics (SOTA endless-runner pattern):
+ * - Tap on ground → instant jump at JUMP_POWER_MIN
+ * - Hold on ground → accumulate power, release for higher jump (up to JUMP_POWER_MAX)
+ * - Tap in air (after first jump) → double-jump at JUMP_POWER_MIN (once per air time)
+ * - Coyote time: 100ms grace after walking off edge
+ */
 export function startJump(state: GameState): void {
   const p = state.player
   if (p.anim === 'dead' || state.phase !== 'playing') return
+
+  // Double-jump: tap while in the air
+  if (!p.grounded && p.doubleJumpAvailable) {
+    p.vy = -JUMP_POWER_MIN * 0.85  // slightly weaker than ground jump
+    p.doubleJumpAvailable = false
+    p.anim = 'jumping'
+    return
+  }
+
   if (!p.grounded) return
 
   p.isHoldingJump = true
@@ -331,7 +347,7 @@ export function releaseJump(state: GameState): void {
   if (!p.isHoldingJump) return
   p.isHoldingJump = false
 
-  if (!p.grounded) return  // already left ground somehow
+  if (!p.grounded) return
 
   const holdRatio = Math.min(p.jumpHoldMs / MAX_JUMP_HOLD_MS, 1)
   const power = JUMP_POWER_MIN + holdRatio * (JUMP_POWER_MAX - JUMP_POWER_MIN)
@@ -340,6 +356,7 @@ export function releaseJump(state: GameState): void {
   p.onPlatformId = null
   p.anim = 'jumping'
   p.jumpHoldMs = 0
+  p.doubleJumpAvailable = true  // can double-jump once after leaving ground
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
