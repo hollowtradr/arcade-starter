@@ -6,7 +6,6 @@
  */
 
 import * as sdk from '../sdk.js'
-import { type ResultData } from '../sdk.js'
 import { tgHaptic, tgMainButton } from '../tg.js'
 import { getGameOverQuote } from '../game/index.js'
 import { getSprites } from '../game/assets.js'
@@ -151,7 +150,7 @@ async function postGameResult(
   renderResultData(result)
 }
 
-function renderResultData(result: sdk.SDKResponse<ResultData>): void {
+function renderResultData(result: sdk.SDKResponse<sdk.ResultData>): void {
   const midiEl   = document.getElementById('result-midi-val')
   const rankEl   = document.getElementById('result-rank')
   const trophyEl = document.getElementById('result-trophy')
@@ -159,15 +158,7 @@ function renderResultData(result: sdk.SDKResponse<ResultData>): void {
   if (!result.success) {
     if (midiEl) {
       const errMsg = (result.error || '').toLowerCase()
-      // Show real explanation for known errors instead of cryptic '+?? midi'
-      if (errMsg.includes('daily limit')) {
-        midiEl.innerHTML = `
-          <span class="midi-mock">Daily Cap Reached</span>
-          <div class="midi-note">
-            You've used today's 3 plays. Comes back fresh tomorrow.
-          </div>
-        `
-      } else if (errMsg.includes('no session') || errMsg.includes('unauthorized')) {
+      if (errMsg.includes('no session') || errMsg.includes('unauthorized')) {
         midiEl.innerHTML = `
           <span class="midi-mock">Demo Mode</span>
           <div class="midi-note">
@@ -176,9 +167,9 @@ function renderResultData(result: sdk.SDKResponse<ResultData>): void {
         `
       } else {
         midiEl.innerHTML = `
-          <span class="midi-mock">Midi Pending</span>
+          <span class="midi-mock">Could Not Record</span>
           <div class="midi-note">
-            ${result.error || 'Could not record the result. Try Run Again.'}
+            ${result.error || 'Try Run Again.'}
           </div>
         `
       }
@@ -188,22 +179,75 @@ function renderResultData(result: sdk.SDKResponse<ResultData>): void {
 
   const data = result.data
 
+  if (rankEl && data.leaderboard_rank) {
+    rankEl.textContent = `Tentative rank: #${data.leaderboard_rank} this month`
+  }
+
+  // v2: /result is a practice record. Show projected midi + Submit button if cap allows.
+  if (!midiEl) return
+
+  if (data.submits_remaining > 0 && data.projected_midi > 0) {
+    midiEl.innerHTML = `
+      <div class="midi-projected">Bank this run for <strong>+${data.projected_midi}</strong> midi</div>
+      <button class="btn btn-primary swamp-btn submit-btn" id="result-submit">
+        ✨ Submit Score (${data.submits_remaining} left today)
+      </button>
+      <div class="midi-note">Or replay to chase a higher score — only banked runs count.</div>
+    `
+    document.getElementById('result-submit')?.addEventListener('click', async () => {
+      const btn = document.getElementById('result-submit') as HTMLButtonElement | null
+      if (btn) { btn.disabled = true; btn.textContent = 'Banking…' }
+      const submitResp = await sdk.submitResult(data.result_id)
+      renderSubmittedState(submitResp)
+    })
+  } else if (data.submits_remaining <= 0) {
+    midiEl.innerHTML = `
+      <span class="midi-mock">Daily Cap Reached</span>
+      <div class="midi-note">
+        You've used today's 3 submits. Replay all you want — cap resets in 24h.
+      </div>
+    `
+  } else {
+    midiEl.innerHTML = `
+      <span class="midi-mock">No Midi (score: 0)</span>
+      <div class="midi-note">Pick up some Force essence next run!</div>
+    `
+  }
+
+  tgHaptic('selection')
+  void trophyEl  // trophy fires on submit, not here
+}
+
+function renderSubmittedState(resp: sdk.SDKResponse<sdk.SubmitData>): void {
+  const midiEl   = document.getElementById('result-midi-val')
+  const rankEl   = document.getElementById('result-rank')
+  const trophyEl = document.getElementById('result-trophy')
+
+  if (!resp.success) {
+    if (midiEl) {
+      const err = (resp.error || '').toLowerCase()
+      if (err.includes('cap') || err.includes('daily')) {
+        midiEl.innerHTML = `<span class="midi-mock">Daily Cap Reached</span><div class="midi-note">${resp.error}</div>`
+      } else {
+        midiEl.innerHTML = `<span class="midi-mock">Submit Failed</span><div class="midi-note">${resp.error}</div>`
+      }
+    }
+    tgHaptic('warning')
+    return
+  }
+  const data = resp.data
   if (midiEl) {
-    midiEl.innerHTML = `<span class="midi-earned">+${data.midi_awarded}</span>`
+    midiEl.innerHTML = `<span class="midi-earned">+${data.midi_awarded} midi</span>`
     midiEl.classList.add('animating')
     setTimeout(() => midiEl.classList.remove('animating'), 600)
   }
-
-  tgHaptic(data.midi_awarded > 0 ? 'success' : 'warning')
-
   if (rankEl && data.leaderboard_rank) {
     rankEl.textContent = `Rank: #${data.leaderboard_rank} this month`
   }
-
   if (trophyEl && data.trophy_awarded) {
-    trophyEl.innerHTML = `🏆 <strong>${data.trophy_awarded.name}</strong><br><small>${data.trophy_awarded.description ?? ''}</small>`
+    trophyEl.innerHTML = `🏆 <strong>${data.trophy_awarded.name}</strong>`
     trophyEl.classList.remove('hidden')
     trophyEl.classList.add('visible')
-    tgHaptic('success')
   }
+  tgHaptic('success')
 }

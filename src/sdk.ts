@@ -68,9 +68,22 @@ export interface ResultPayload {
 }
 
 export interface ResultData {
+  result_id: string
+  midi_awarded: number          // 0 from /result (v2); set by /submit
+  projected_midi: number        // what /submit would mint
+  submits_remaining: number     // bankable runs left today
+  trophy_awarded: TrophyData | null  // always null from /result; set by /submit
+  leaderboard_rank: number | null
+  message: string
+}
+
+export interface SubmitData {
+  result_id: string
   midi_awarded: number
+  new_midi_balance: number
   trophy_awarded: TrophyData | null
   leaderboard_rank: number | null
+  submits_remaining: number
   message: string
 }
 
@@ -212,6 +225,22 @@ export async function postResult(
       play_duration_seconds: payload.play_duration_seconds,
       metadata: payload.metadata ?? {},
     }),
+  })
+}
+
+/**
+ * Bank a practice result — mints midi, counts toward daily cap, awards trophies
+ * if rank qualifies, posts to public leaderboard.
+ *
+ * Call this only when the player explicitly chooses to submit a run (e.g. taps
+ * a 'Submit Score' button). Idempotent: 409 if already submitted.
+ */
+export async function submitResult(
+  resultId: string,
+): Promise<SDKResponse<SubmitData>> {
+  return apiFetch<SubmitData>('/arcade/v0/submit', {
+    method: 'POST',
+    body: JSON.stringify({ result_id: resultId }),
   })
 }
 

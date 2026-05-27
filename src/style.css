@@ -480,6 +480,28 @@ html, body {
 
 .midi-spinner { opacity: 0.6; }
 
+.midi-projected {
+  font-family: 'Fraunces', serif;
+  font-size: 14px;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.midi-projected strong {
+  font-family: 'Cinzel Decorative', serif;
+  color: var(--gold);
+  font-size: 18px;
+}
+.submit-btn {
+  margin-top: 6px;
+  margin-bottom: 6px;
+  font-size: 14px;
+  padding: 10px 18px;
+}
+.submit-btn:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
 .result-midi-value.animating {
   animation: midi-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
