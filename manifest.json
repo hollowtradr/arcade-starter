@@ -1,62 +1,38 @@
 {
-  "_comment": "Sticker Galaxy Arcade — Game Manifest. Submit this via /council propose_minigame in the Galactic Council Telegram group.",
-  "_review_required": "Fields marked [REQUIRED] must be filled before submitting for review.",
-
-  "name": "Your Game Name",                    // [REQUIRED] Display name in the Arcade
-  "studio": "Your Studio Name",                 // [REQUIRED] Studio display name
-  "studio_ton_wallet": "EQD...",                // [REQUIRED] TON wallet for revenue payouts (70% of purchases)
-
-  "genre": "arcade",                            // [REQUIRED] e.g. "arcade", "auto-battler", "puzzle", "racing"
-  "sector": "cantina-district",                 // [REQUIRED] Telegram group sector your game belongs to
-  "description": "One-line description of what makes your game fun and unique.",
-
-  "url": "https://your-game.your-domain.com",   // [REQUIRED] Production URL (must be HTTPS)
-  "sandbox_url": "https://your-game.your-domain.com?sandbox=1", // Staging URL for review testing
-
-  "max_score": 1000,                            // [REQUIRED] Realistic maximum score a human can achieve
-  "perfect_score_achievable": false,            // true if a perfect run is possible (enables Exceptional Eight rule)
-  "play_duration_range_seconds": [5, 15],       // [REQUIRED] [min, max] for a single play session
-
-  "trophy_enabled": true,                       // true = opt into monthly leaderboard trophies
-  "wager_enabled": false,                       // true = enable player-vs-player midi wagering
-
-  "cosmetic_items": [
-    {
-      "_comment": "Remove this block if you have no cosmetic items to sell",
-      "item_id": "my_cosmetic_skin",
-      "name": "Example Skin",
-      "description": "A cosmetic skin — no stats attached.",
-      "price_ton": 0.5,
-      "icon_url": "https://your-game.your-domain.com/assets/skin.png"
-    }
-  ],
-
+  "name": "Swamp Runner",
+  "studio": "Sticker Galaxy First-Party",
+  "studio_ton_wallet": "TBD-hollow-wallet",
+  "genre": "endless-runner",
+  "sector": "yodalon-prime-swamp",
+  "description": "Hop across the Dagobah swamp. Gather Force essence. Dodge mynocks. Train under Master Yoda's watch.",
+  "url": "TBD-after-deploy",
+  "sandbox_url": "TBD-after-deploy",
+  "wager_enabled": false,
+  "trophy_enabled": true,
+  "max_score": 5000,
+  "perfect_score_achievable": false,
+  "play_duration_range_seconds": [10, 300],
   "studio_trophies": [
     {
-      "trophy_id": "first_win",
-      "name": "First Win",
-      "description": "Won your first round",
+      "trophy_id": "rookie_swampling",
+      "name": "Rookie Swampling",
+      "description": "Completed your first run",
       "condition": "first_win",
-      "icon_url": "https://your-game.your-domain.com/assets/trophy_first_win.png"
+      "icon_url": "TBD"
     },
     {
-      "trophy_id": "veteran_100",
-      "name": "Veteran",
-      "description": "Played 100 rounds",
-      "condition": "plays_cumulative:100",
-      "icon_url": "https://your-game.your-domain.com/assets/trophy_veteran.png"
+      "trophy_id": "force_acolyte",
+      "name": "Force Acolyte",
+      "description": "Scored 1000 Force-paces",
+      "condition": "score_threshold:1000",
+      "icon_url": "TBD"
+    },
+    {
+      "trophy_id": "padawan_initiate",
+      "name": "Padawan Initiate",
+      "description": "Played 50 runs",
+      "condition": "plays_cumulative:50",
+      "icon_url": "TBD"
     }
-  ],
-
-  "_tournament_comment": "Remove 'tournament' block if you don't want monthly tournaments",
-  "tournament": {
-    "schedule": "monthly",
-    "entry_fee_ton": 1,
-    "prize_distribution": [
-      { "rank": 1, "prize_type": "ton_payout", "value_ton": 0 },
-      { "rank": 2, "prize_type": "telegram_gift" },
-      { "rank": 3, "prize_type": "telegram_gift" },
-      { "rank": "4-10", "prize_type": "cosmetic_trophy" }
-    ]
-  }
+  ]
 }

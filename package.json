@@ -1,7 +1,7 @@
 {
-  "name": "arcade-starter",
+  "name": "swamp-runner",
   "version": "0.1.0",
-  "description": "Sticker Galaxy Arcade — Studio Starter Template",
+  "description": "Swamp Runner — Sticker Galaxy First-Party Endless Runner",
   "private": true,
   "type": "module",
   "scripts": {

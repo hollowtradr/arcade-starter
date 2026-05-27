@@ -1,148 +1,147 @@
 /**
- * ============================================================
- * src/game/index.ts — "Tap-the-Sticker" placeholder game
- * ============================================================
- * THIS IS A THROWAWAY PLACEHOLDER.
- * Replace this file (and the rest of src/game/) with your real
- * game logic. The only contract with main.ts is:
- *   - Call startGame(canvas, onEnd) to begin
- *   - When the game ends, call onEnd(score, outcome)
+ * src/game/index.ts — Swamp Runner game controller
  *
- * Keep src/sdk.ts and src/tg.ts unchanged.
- * ============================================================
- *
- * Rules of "Tap-the-Sticker":
- *   - A sticker emoji appears at a random position on the canvas
- *   - Tapping/clicking it scores +100 and moves it to a new position
- *   - Missing (tapping empty space) scores nothing
- *   - Game ends after GAME_DURATION_SECONDS (10 seconds)
+ * Public API:
+ *   startGame(onEnd)   — begins a play session
+ *   stopGame()         — cancels the loop (e.g., session killed)
+ *   getGameState()     — returns current state (for HUD polling)
  */
 
-import { initCanvas, renderFrame, getCanvasSize } from './render.js'
-import {
-  createInitialState,
-  randomSticker,
-  type GameState,
-  GAME_DURATION_SECONDS,
-} from './state.js'
+import { initCanvas, renderFrame, renderScoreHUD, updatePlayerAnimation, getCanvasSize } from './render.js'
+import { createInitialState, type GameState, GAME_OVER_QUOTES } from './state.js'
+import { updatePhysics, startJump, releaseJump } from './physics.js'
+import { loadAllSprites, type Sprites } from './assets.js'
 import { tgHaptic } from '../tg.js'
 
 type GameEndCallback = (score: number, outcome: 'win' | 'loss') => void
 
-// ── Module state ─────────────────────────────────────────────────────────────
+// ── Module state ──────────────────────────────────────────────────────────────
 
-let _state: GameState = createInitialState()
+let _state: GameState | null = null
+let _sprites: Sprites | null = null
 let _rafId = 0
 let _lastTs = 0
 let _onEnd: GameEndCallback | null = null
 let _canvas: HTMLCanvasElement | null = null
-let _handlePointer: ((e: PointerEvent) => void) | null = null
+let _pointerDownHandler: ((e: PointerEvent) => void) | null = null
+let _pointerUpHandler: ((e: PointerEvent) => void) | null = null
 
-// ── Public API ───────────────────────────────────────────────────────────────
+// ── Public API ────────────────────────────────────────────────────────────────
 
-/** Start the game. canvas is the <canvas> element; onEnd is called when the game finishes. */
-export function startGame(onEnd: GameEndCallback): void {
+export async function startGame(onEnd: GameEndCallback): Promise<void> {
   _onEnd = onEnd
+
+  // Load sprites (may already be cached)
+  _sprites = await loadAllSprites()
+
   const { canvas } = initCanvas()
   _canvas = canvas
+  const { w, h } = getCanvasSize()
 
-  _state = createInitialState()
+  _state = createInitialState(w, h)
   _state.phase = 'playing'
-  _state.startTime = performance.now()
-  _state.sticker = randomSticker(getCanvasSize().w, getCanvasSize().h)
 
-  // Input
-  _handlePointer = handlePointer
-  _canvas.addEventListener('pointerdown', _handlePointer)
+  // Input: tap to jump, hold to charge
+  _pointerDownHandler = (e: PointerEvent) => {
+    e.preventDefault()
+    if (!_state) return
+    startJump(_state)
+    tgHaptic('impact_light')
+  }
+  _pointerUpHandler = (e: PointerEvent) => {
+    e.preventDefault()
+    if (!_state) return
+    releaseJump(_state)
+  }
 
-  // Kick off render loop
+  _canvas.addEventListener('pointerdown', _pointerDownHandler, { passive: false })
+  _canvas.addEventListener('pointerup',   _pointerUpHandler,   { passive: false })
+  // Also handle pointer leave (finger left screen)
+  _canvas.addEventListener('pointerleave', _pointerUpHandler,  { passive: false })
+
   _lastTs = performance.now()
   _rafId = requestAnimationFrame(loop)
 }
 
 export function stopGame(): void {
   cancelAnimationFrame(_rafId)
-  if (_canvas && _handlePointer) {
-    _canvas.removeEventListener('pointerdown', _handlePointer)
-  }
+  _rafId = 0
+  cleanupInput()
 }
 
-export function getGameState(): GameState {
+export function getGameState(): GameState | null {
   return _state
 }
 
 // ── Game loop ─────────────────────────────────────────────────────────────────
 
 function loop(ts: number): void {
-  const dt = (ts - _lastTs) / 1000
+  const dt = Math.min((ts - _lastTs) / 1000, 0.05)  // cap at 50ms to prevent spiral
   _lastTs = ts
 
-  if (_state.phase === 'playing') {
-    _state.timeRemaining = Math.max(
-      0,
-      GAME_DURATION_SECONDS - (performance.now() - _state.startTime) / 1000,
-    )
+  if (!_state || !_sprites) return
 
-    if (_state.timeRemaining <= 0) {
-      endGame()
-      return
+  const { w, h } = getCanvasSize()
+
+  // Sync groundY to canvas size (handles orientation change)
+  const targetGroundY = Math.round(h * 0.74)
+  if (Math.abs(_state.groundY - targetGroundY) > 10) {
+    _state.groundY = targetGroundY
+    // Reposition player if on ground
+    if (_state.player.grounded && _state.player.onPlatformId === null) {
+      _state.player.screenY = targetGroundY - _state.player.height
     }
   }
 
-  renderFrame(_state, dt)
-  _rafId = requestAnimationFrame(loop)
-}
+  // Physics
+  updatePhysics(_state, dt, w, h)
+  updatePlayerAnimation(dt, _state.player.anim === 'running')
 
-// ── Input ─────────────────────────────────────────────────────────────────────
+  // Render
+  renderFrame(_state, _sprites, dt)
+  renderScoreHUD(_state, w)
 
-function handlePointer(e: PointerEvent): void {
-  if (_state.phase !== 'playing') return
-
-  const rect = (_canvas as HTMLCanvasElement).getBoundingClientRect()
-  const px = e.clientX - rect.left
-  const py = e.clientY - rect.top
-
-  const sticker = _state.sticker
-  if (!sticker || !sticker.visible) return
-
-  const dx = px - sticker.x
-  const dy = py - sticker.y
-  const dist = Math.sqrt(dx * dx + dy * dy)
-
-  if (dist <= sticker.radius * 1.3) {
-    // Hit!
-    _state.score += 100
-    _state.tapCount++
-    sticker.hitAt = performance.now()
-    tgHaptic('impact_medium')
-
-    // Spawn a new sticker after a short flash delay
-    setTimeout(() => {
-      if (_state.phase === 'playing') {
-        const { w, h } = getCanvasSize()
-        _state.sticker = randomSticker(w, h)
-      }
-    }, 120)
-  } else {
-    _state.misses++
+  // Check end condition
+  if (_state.phase === 'ended') {
+    handleGameEnd()
+    return
   }
+
+  _rafId = requestAnimationFrame(loop)
 }
 
 // ── End ───────────────────────────────────────────────────────────────────────
 
-function endGame(): void {
-  cancelAnimationFrame(_rafId)
-  _state.phase = 'ended'
-  _state.endTime = performance.now()
+function handleGameEnd(): void {
+  cleanupInput()
+  if (!_state) return
 
-  if (_canvas && _handlePointer) {
-    _canvas.removeEventListener('pointerdown', _handlePointer)
+  const state = _state
+  tgHaptic('error')
+
+  // Short delay so player sees the death frame before result screen
+  setTimeout(() => {
+    const finalScore = state.score
+    // Any score > 0 is a 'win' — the game doesn't have a lose-state score, just death
+    const outcome: 'win' | 'loss' = finalScore > 0 ? 'win' : 'loss'
+    _onEnd?.(finalScore, outcome)
+  }, 800)
+}
+
+function cleanupInput(): void {
+  if (_canvas && _pointerDownHandler) {
+    _canvas.removeEventListener('pointerdown', _pointerDownHandler)
   }
+  if (_canvas && _pointerUpHandler) {
+    _canvas.removeEventListener('pointerup',   _pointerUpHandler)
+    _canvas.removeEventListener('pointerleave', _pointerUpHandler)
+  }
+  _pointerDownHandler = null
+  _pointerUpHandler   = null
+}
 
-  tgHaptic(_state.score > 0 ? 'success' : 'warning')
+// ── Export game-over quote helper ─────────────────────────────────────────────
 
-  // Any score > 0 counts as a win for this placeholder game.
-  // Studios: define their own outcome logic.
-  const outcome: 'win' | 'loss' = _state.score > 0 ? 'win' : 'loss'
-  _onEnd?.(  _state.score, outcome)
+export function getGameOverQuote(): string {
+  return GAME_OVER_QUOTES[Math.floor(Math.random() * GAME_OVER_QUOTES.length)]
 }

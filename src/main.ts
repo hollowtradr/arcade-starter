@@ -1,15 +1,17 @@
 /**
- * src/main.ts — entry point
+ * src/main.ts — Swamp Runner entry point
  *
- * Order of operations:
- *   1. tgReady()          — signal Telegram we're loaded, expand to full screen
- *   2. initSDK()          — read session_token / game_id from URL params
- *   3. initSession()      — validate token with the host API
- *   4. postEntry(0)       — register a play session (0 midi = free-to-play)
- *   5. startGame()        — run the game loop
- *   6. endGame(score)     → postResult() via ResultScreen
- *
- * Replace src/game/ with your real game. Keep this file and sdk.ts/tg.ts.
+ * Flow:
+ *   1. tgReady()          — signal Telegram, expand viewport
+ *   2. initSDK()          — read session_token / game_id from URL
+ *   3. initSession()      — validate with host API
+ *   4. showTitleScreen()  — hero screen with Baby Yoda art
+ *   5. On "Play" tap:
+ *      a. postEntry(0)    — free-to-play (0 midi)
+ *      b. startGame()     — run the game loop
+ *   6. On game end:
+ *      a. showResultScreen() — post result, show midi/trophy/rank
+ *   7. "Run Again" → back to step 5
  */
 
 import './style.css'
@@ -24,65 +26,56 @@ import {
   hideResultScreen,
 } from './ui/ResultScreen.js'
 import { onHostMessage, postMessageBridge } from './sdk.js'
-import { type GameState } from './game/state.js'
+import { loadAllSprites } from './game/assets.js'
 import { getGameState } from './game/index.js'
 
-// ── Init ──────────────────────────────────────────────────────────────────────
+// ── Boot ──────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  // 1. Tell Telegram we're alive and want full-screen
   tgReady()
-
-  // 2. Bootstrap SDK (reads URL params / .env)
   sdk.initSDK()
-
-  // 3. Set up UI singletons
   initHUD()
   initResultScreen()
 
-  // 4. Handle host→game messages
+  // Host message hooks
   onHostMessage('SESSION_EXPIRING', () => {
-    // Save important state here before the session dies
-    console.warn('[arcade] Session expiring in 5 min — save state!')
-  })
-  onHostMessage('SESSION_KILLED', () => {
+    console.warn('[swamp-runner] Session expiring — saving state')
     stopGame()
   })
-  onHostMessage('PURCHASE_CONFIRMED', (data) => {
-    console.log('[arcade] Purchase confirmed:', data)
-  })
+  onHostMessage('SESSION_KILLED', () => stopGame())
+  onHostMessage('PURCHASE_CONFIRMED', (data) => console.log('[swamp-runner] Purchase:', data))
 
-  // 5. Back button — save state and signal host
+  // Back button → exit cleanly
   tgBackButton(() => {
     stopGame()
     postMessageBridge('GAME_COMPLETE', { entry_id: '' })
   })
 
-  // 6. Signal host that we're ready
   postMessageBridge('GAME_READY')
 
-  // 7. Validate session
-  setLoadingMessage('Connecting to Sticker Galaxy…')
+  // Pre-load sprites in background while showing loading screen
+  loadAllSprites().catch(() => {/* sprites degrade to drawn fallback */})
+
+  // Show loading, validate session
+  setLoadingMessage('Entering the Dagobah swamp…')
   const sessionResult = await sdk.initSession()
 
   if (!sessionResult.success) {
     setLoadingMessage(
       sdk.hasToken()
         ? `Connection error: ${sessionResult.error}`
-        : 'Connect to Sticker Galaxy via @stickergalaxybot to play for real.\n\nFor local dev: add ?session_token=... to the URL.',
+        : 'No session token found.\n\nFor local dev: add ?session_token=dev to the URL.\nLaunch from @stickergalaxybot for real rewards.',
       true,
     )
-    // Still show the game in "demo mode" — let them see the UI
-    setTimeout(() => showStartScreen(null), 1500)
+    setTimeout(() => showTitleScreen(null), 1800)
     return
   }
 
-  const session = sessionResult.data
   hideLoading()
-  showStartScreen(session)
+  showTitleScreen(sessionResult.data)
 }
 
-// ── Start screen ──────────────────────────────────────────────────────────────
+// ── Title screen ──────────────────────────────────────────────────────────────
 
 interface SessionData {
   display_name: string
@@ -90,47 +83,79 @@ interface SessionData {
   daily_plays_remaining: number
 }
 
-function showStartScreen(session: SessionData | null): void {
+function showTitleScreen(session: SessionData | null): void {
+  // Remove any existing title screen
+  document.getElementById('title-screen')?.remove()
+
   const app = document.getElementById('app')!
-  // Inject a simple start screen into the canvas container
-  const startEl = document.createElement('div')
-  startEl.id = 'start-screen'
-  startEl.style.cssText = `
-    position:absolute;inset:0;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;gap:16px;
-    background:rgba(15,15,35,0.92);z-index:25;padding:24px;text-align:center;
-  `
+  const titleEl = document.createElement('div')
+  titleEl.id = 'title-screen'
 
-  const playsLeft = session?.daily_plays_remaining ?? '∞'
-  const midiBalance = session?.midi_balance ?? '—'
-  const displayName = session?.display_name ?? 'Guest'
   const isDemoMode = session === null
+  const playsLeft  = session?.daily_plays_remaining ?? '∞'
+  const midiBalance = session?.midi_balance ?? '—'
+  const displayName = session?.display_name ?? 'Wanderer'
 
-  startEl.innerHTML = `
-    <div style="font-size:48px">⭐</div>
-    <h1 style="font-size:26px;font-weight:800;color:#f1f5f9">Tap-the-Sticker</h1>
-    <p style="font-size:14px;color:#94a3b8;max-width:260px;line-height:1.5">
-      ${isDemoMode
-        ? '⚠️ Demo mode — no real midi rewards.<br>Launch from @stickergalaxybot for the real thing.'
-        : `Welcome, ${displayName}! Tap every sticker you see.<br>You have <strong>${playsLeft}</strong> play(s) left today.`
-      }
-    </p>
-    ${!isDemoMode ? `
-    <div style="background:#1a1a3e;border:1px solid #fbbf24;border-radius:12px;padding:12px 24px;">
-      <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:#94a3b8">Midi Balance</div>
-      <div style="font-size:28px;font-weight:700;color:#fbbf24">${midiBalance}</div>
-    </div>` : ''}
-    <button id="start-btn" class="btn btn-primary" style="margin-top:8px;font-size:18px;padding:16px 40px;">
-      ▶ Start (10s)
-    </button>
-    <button id="lb-btn" class="btn btn-ghost" style="font-size:14px;">🏆 Leaderboard</button>
+  titleEl.innerHTML = `
+    <div class="title-bg">
+      <div class="title-mist title-mist-1"></div>
+      <div class="title-mist title-mist-2"></div>
+    </div>
+
+    <div class="title-content">
+      <div class="title-hero">
+        <img src="/sprites/baby_yoda_title.png" class="title-hero-img" alt="Baby Yoda" />
+      </div>
+
+      <div class="title-text-block">
+        <div class="title-eyebrow">Sticker Galaxy Arcade</div>
+        <h1 class="title-name">Swamp Runner</h1>
+        <p class="title-tagline">
+          Hop across Dagobah. Gather Force essence.<br>
+          Train under Master Yoda's watch.
+        </p>
+      </div>
+
+      ${!isDemoMode ? `
+      <div class="title-player-card">
+        <span class="title-player-name">${escapeHtml(displayName)}</span>
+        <div class="title-player-stats">
+          <span>⚡ ${midiBalance} midi</span>
+          <span class="title-divider">·</span>
+          <span>${playsLeft} run${playsLeft === 1 ? '' : 's'} left today</span>
+        </div>
+      </div>` : `
+      <div class="title-demo-badge">⚠️ Demo mode — launch from @stickergalaxybot for rewards</div>
+      `}
+
+      <div class="title-controls-hint">
+        <div class="title-control-row">
+          <span class="control-key">TAP</span> <span>Jump</span>
+        </div>
+        <div class="title-control-row">
+          <span class="control-key">HOLD</span> <span>Higher jump</span>
+        </div>
+      </div>
+
+      <button id="play-btn" class="btn swamp-play-btn">
+        ▶ Begin Training
+      </button>
+      <button id="lb-btn" class="btn btn-ghost swamp-ghost-btn">
+        🏆 Leaderboard
+      </button>
+    </div>
   `
-  app.appendChild(startEl)
 
-  document.getElementById('start-btn')?.addEventListener('click', () => {
-    startEl.remove()
-    beginGame(session)
+  app.appendChild(titleEl)
+
+  document.getElementById('play-btn')?.addEventListener('click', () => {
+    titleEl.classList.add('fade-out')
+    setTimeout(() => {
+      titleEl.remove()
+      beginGame(session)
+    }, 300)
   })
+
   document.getElementById('lb-btn')?.addEventListener('click', () => {
     import('./ui/Leaderboard.js').then(({ showLeaderboard }) => showLeaderboard())
   })
@@ -139,45 +164,43 @@ function showStartScreen(session: SessionData | null): void {
 // ── Game flow ─────────────────────────────────────────────────────────────────
 
 let _midiBalance: number | null = null
+let _currentSession: SessionData | null = null
 
 async function beginGame(session: SessionData | null): Promise<void> {
+  _currentSession = session
   _midiBalance = session?.midi_balance ?? null
 
-  // Post entry (free-to-play = 0 midi)
-  const entryResult = await sdk.postEntry(0, 'Tap-the-Sticker round')
+  // Post entry — free-to-play
+  const entryResult = await sdk.postEntry(0, 'Swamp Runner entry')
   let entryId = ''
 
   if (entryResult.success) {
     entryId = entryResult.data.entry_id
     _midiBalance = entryResult.data.new_midi_balance
   } else {
-    console.warn('[arcade] postEntry failed (demo mode):', entryResult.error)
+    console.warn('[swamp-runner] postEntry failed (demo/dev mode):', entryResult.error)
   }
 
   const gameStartTime = performance.now()
   setEntryContext(entryId, gameStartTime)
 
   showHUD()
-  startGame(onGameEnd)
+  await startGame(onGameEnd)
 
-  // HUD update loop
+  // HUD polling (canvas renders the score; DOM HUD shows midi balance)
   const hudInterval = setInterval(() => {
-    const state: GameState = getGameState()
+    const state = getGameState()
     updateHUD(state, _midiBalance)
-    if (state.phase === 'ended') clearInterval(hudInterval)
-  }, 100)
+    if (!state || state.phase === 'ended') clearInterval(hudInterval)
+  }, 150)
 }
 
 function onGameEnd(score: number, outcome: 'win' | 'loss'): void {
   hideHUD()
   showResultScreen(score, outcome, () => {
-    // Play again
+    // Play again → new entry
     hideResultScreen()
-    showStartScreen(
-      _midiBalance !== null
-        ? { display_name: '', midi_balance: _midiBalance, daily_plays_remaining: 0 }
-        : null,
-    )
+    beginGame(_currentSession)
   })
 }
 
@@ -199,9 +222,13 @@ function hideLoading(): void {
   el?.classList.add('hidden')
 }
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
-main().catch((err) => {
-  console.error('[arcade] Fatal error:', err)
+main().catch((err: unknown) => {
+  console.error('[swamp-runner] Fatal:', err)
   setLoadingMessage(`Fatal error: ${(err as Error).message}`, true)
 })

@@ -3,31 +3,45 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#0f0f23" />
-    <title>Sticker Galaxy Arcade</title>
-    <!-- Telegram Web App SDK — required for tg.* helpers -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0d1a10" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Swamp Runner — Sticker Galaxy Arcade</title>
+    <!-- Telegram Web App SDK — required for Sticker Galaxy iframe integration -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- Google Fonts: Cinzel Decorative (titles), Fraunces (body), IM Fell English (signs) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700;900&family=Fraunces:ital,wght@0,300;0,400;0,700;1,300;1,400&family=IM+Fell+English:ital@0;1&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
     <div id="app">
-      <!-- Canvas is injected by src/game/render.ts -->
+      <!-- Main game canvas — owns the full viewport during gameplay -->
       <canvas id="game-canvas"></canvas>
 
-      <!-- HUD overlay: score, timer, midi balance -->
+      <!-- HUD overlay — minimal DOM layer; score is drawn on canvas -->
       <div id="hud" class="hud hidden"></div>
 
-      <!-- Result screen: shown after game ends -->
+      <!-- Result screen — shown after game ends -->
       <div id="result-screen" class="result-screen hidden"></div>
 
-      <!-- Loading / error state -->
+      <!-- Loading / error state — shown during session init -->
       <div id="loading-screen" class="loading-screen">
         <div class="loading-content">
           <div class="spinner"></div>
-          <p id="loading-message">Connecting to Sticker Galaxy…</p>
+          <p id="loading-message">Entering the Dagobah swamp…</p>
         </div>
       </div>
     </div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
