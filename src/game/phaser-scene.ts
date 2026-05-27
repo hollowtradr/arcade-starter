@@ -107,6 +107,14 @@ export class SwampScene extends Phaser.Scene {
     nx: i / 8 + 0.02, nh: 0.12 + (i * 0.113 % 0.08), nw: 0.055 + (i * 0.067 % 0.025),
   }))
 
+  // V2 painted tree sprites (Stage 2): pooled, positioned by world offset
+  private treeFarSprites: Phaser.GameObjects.Image[] = []
+  private treeMidSprites: Phaser.GameObjects.Image[] = []
+  private treeNearSprites: Phaser.GameObjects.Image[] = []
+
+  // V2 painted obstacle / pickup sprite pools
+  private obstaclePool: Map<string, Phaser.GameObjects.Image[]> = new Map()
+
   constructor() { super({ key: 'SwampScene' }) }
 
   // ── Phaser lifecycle ──────────────────────────────────────────────────────
@@ -122,10 +130,25 @@ export class SwampScene extends Phaser.Scene {
   preload(): void {
     // Silence 404s for missing sprites gracefully
     this.load.on('loaderror', (_file: unknown) => { /* ignore */ })
+    // Original Egor-style v1 sprites
     this.load.image('yoda_idle',   '/sprites/yoda_idle.png')
-    this.load.image('yoda_jump',   '/sprites/yoda_jump.png')
-    this.load.image('yoda_hit',    '/sprites/yoda_hit.png')
-    this.load.image('yoda_defeat', '/sprites/yoda_defeat.png')
+    // V2 painted assets (Stage 2 — Gemini-generated, Egor-style)
+    this.load.image('yoda_jump',   '/sprites/v2/yoda_jump_v2.png')
+    this.load.image('yoda_hit',    '/sprites/v2/yoda_hit_v2.png')
+    this.load.image('yoda_defeat', '/sprites/v2/yoda_defeat_v2.png')
+    this.load.image('log_v2',      '/sprites/v2/log_v2.png')
+    this.load.image('log_sink_v2', '/sprites/v2/log_sinking_v2.png')
+    this.load.image('slime_v2',    '/sprites/v2/slime_v2.png')
+    this.load.image('vine_v2',     '/sprites/v2/vine_v2.png')
+    this.load.image('mynock_v2',   '/sprites/v2/mynock_v2.png')
+    this.load.image('bibo_v2',     '/sprites/v2/bibo_v2.png')
+    this.load.image('holocron_v2', '/sprites/v2/holocron_v2.png')
+    this.load.image('mote_v2',     '/sprites/v2/mote_v2.png')
+    this.load.image('tree_far_v2', '/sprites/v2/tree_far_v2.png')
+    this.load.image('tree_mid_v2', '/sprites/v2/tree_mid_v2.png')
+    this.load.image('tree_near_v2','/sprites/v2/tree_near_v2.png')
+    this.load.image('mushroom_v2', '/sprites/v2/mushroom_v2.png')
+    this.load.image('reed_v2',     '/sprites/v2/reed_v2.png')
   }
 
   create(): void {
@@ -352,15 +375,60 @@ export class SwampScene extends Phaser.Scene {
     g.fillStyle(0xb4dcb4, 0.040); g.fillRect(0, gY * 0.64, w, 50)
     g.fillStyle(0xb4dcb4, 0.025); g.fillRect(0, gY * 0.76, w, 50)
 
-    // BG trees (parallax 20%)
-    const bgOff = (this.gs.worldOffset * 0.20) % w
-    this.drawTreeLayer(g, this.bgTrees, w, gY, bgOff,     lerp(DAY.bgTree, TWIL.bgTree, t), 0.38, 0.15)
-    this.drawTreeLayer(g, this.bgTrees, w, gY, bgOff - w, lerp(DAY.bgTree, TWIL.bgTree, t), 0.38, 0.15)
+    // Use painted tree sprites if loaded (Stage 2); fallback to triangle silhouettes
+    if (this.textures.exists('tree_far_v2')) {
+      this.renderPaintedTrees(w, gY)
+    } else {
+      const bgOff = (this.gs.worldOffset * 0.20) % w
+      this.drawTreeLayer(g, this.bgTrees, w, gY, bgOff,     lerp(DAY.bgTree, TWIL.bgTree, t), 0.38, 0.15)
+      this.drawTreeLayer(g, this.bgTrees, w, gY, bgOff - w, lerp(DAY.bgTree, TWIL.bgTree, t), 0.38, 0.15)
+      const fgOff = (this.gs.worldOffset * 0.55) % w
+      this.drawTreeLayer(g, this.fgTrees, w, gY, fgOff,     lerp(DAY.fgTree, TWIL.fgTree, t), 0.15, 0.12)
+      this.drawTreeLayer(g, this.fgTrees, w, gY, fgOff - w, lerp(DAY.fgTree, TWIL.fgTree, t), 0.15, 0.12)
+    }
+  }
 
-    // FG trees (parallax 55%)
-    const fgOff = (this.gs.worldOffset * 0.55) % w
-    this.drawTreeLayer(g, this.fgTrees, w, gY, fgOff,     lerp(DAY.fgTree, TWIL.fgTree, t), 0.15, 0.12)
-    this.drawTreeLayer(g, this.fgTrees, w, gY, fgOff - w, lerp(DAY.fgTree, TWIL.fgTree, t), 0.15, 0.12)
+  /**
+   * Render painted tree layers using v2 sprites positioned by world offset.
+   * Three depth layers with 0.2 / 0.45 / 0.7 parallax scroll rates.
+   */
+  private renderPaintedTrees(w: number, gY: number): void {
+    const POOL = 6  // total trees per layer
+    const ensure = (arr: Phaser.GameObjects.Image[], texKey: string, depth: number) => {
+      if (arr.length === 0) {
+        for (let i = 0; i < POOL; i++) {
+          const img = this.add.image(0, 0, texKey).setOrigin(0.5, 1).setDepth(depth)
+          arr.push(img)
+        }
+      }
+    }
+    ensure(this.treeFarSprites,  'tree_far_v2',  0.5)
+    ensure(this.treeMidSprites,  'tree_mid_v2',  0.7)
+    ensure(this.treeNearSprites, 'tree_near_v2', 0.9)
+
+    // Layer specs: [pool, parallax, baseHeight (px on screen), tint, vertical anchor]
+    const layers: Array<[Phaser.GameObjects.Image[], number, number, number, number]> = [
+      [this.treeFarSprites,  0.20, gY * 0.95, 0xc8d8a0, gY + 4],   // farthest, pale, anchored slightly below ground line
+      [this.treeMidSprites,  0.45, gY * 1.05, 0xffffff, gY + 8],   // mid
+      [this.treeNearSprites, 0.70, gY * 1.20, 0xffffff, gY + 14],  // nearest, biggest
+    ]
+    const spacing = w / 2.5
+
+    for (const [pool, parallax, height, tint, anchorY] of layers) {
+      const off = this.gs.worldOffset * parallax
+      for (let i = 0; i < pool.length; i++) {
+        const baseX = i * spacing
+        // Wrap horizontally: shift by world offset, modulo (pool.length * spacing)
+        const span = pool.length * spacing
+        let x = baseX - (off % span)
+        if (x < -spacing) x += span
+        if (x > w + spacing) x -= span
+        const img = pool[i]
+        img.setPosition(x, anchorY)
+        img.setDisplaySize(height * 0.55, height)
+        img.setTint(tint)
+      }
+    }
   }
 
   private drawTreeLayer(
@@ -422,13 +490,104 @@ export class SwampScene extends Phaser.Scene {
 
   private renderEntities(w: number, h: number): void {
     const g = this.entityGfx; g.clear()
-    for (const pl of this.gs.platforms) this.drawPlatform(g, pl)
-    for (const pk of this.gs.pickups) { if (!pk.collected) this.drawPickup(g, pk) }
-    for (const ob of this.gs.obstacles) this.drawObstacle(g, ob)
+    // If painted v2 obstacle sprites are loaded, use them. Otherwise fall back to Graphics.
+    const usePainted = this.textures.exists('log_v2')
+    if (usePainted) {
+      this.renderPaintedEntities()
+    } else {
+      for (const pl of this.gs.platforms) this.drawPlatform(g, pl)
+      for (const pk of this.gs.pickups) { if (!pk.collected) this.drawPickup(g, pk) }
+      for (const ob of this.gs.obstacles) this.drawObstacle(g, ob)
+    }
 
     // Screen flash overlay
     const fa = Math.max(0, this.gs.screenFlashTimer / 0.4) * 0.35
     if (fa > 0) { g.fillStyle(0x64b4ff, fa); g.fillRect(0, 0, w, h) }
+  }
+
+  /**
+   * Render obstacles/pickups/platforms using v2 painted sprites.
+   * Maintains sprite pools per type; hides unused sprites each frame.
+   */
+  private renderPaintedEntities(): void {
+    // pool helpers
+    const getPool = (key: string): Phaser.GameObjects.Image[] => {
+      let pool = this.obstaclePool.get(key)
+      if (!pool) { pool = []; this.obstaclePool.set(key, pool) }
+      return pool
+    }
+    const useSprite = (poolKey: string, texKey: string, depth: number): Phaser.GameObjects.Image => {
+      const pool = getPool(poolKey)
+      // Find first hidden sprite or create new
+      for (const s of pool) {
+        if (!s.visible) { s.setVisible(true); s.setTexture(texKey); return s }
+      }
+      const img = this.add.image(0, 0, texKey).setOrigin(0.5, 0.5).setDepth(depth)
+      pool.push(img)
+      return img
+    }
+    // Hide all sprites at start; we'll re-show what we need
+    for (const pool of this.obstaclePool.values()) {
+      for (const s of pool) s.setVisible(false)
+    }
+
+    // Platforms (logs)
+    for (const pl of this.gs.platforms) {
+      const y = pl.y + pl.sinkOffset
+      const tex = pl.sinking ? 'log_sink_v2' : 'log_v2'
+      const img = useSprite('log', tex, 1.5)
+      img.setPosition(pl.x + pl.width / 2, y + pl.height / 2)
+      img.setDisplaySize(pl.width + 18, pl.height + 22)
+    }
+
+    // Pickups
+    for (const pk of this.gs.pickups) {
+      if (pk.collected) continue
+      const tex = pk.type === 'essence' ? 'mote_v2'
+                : pk.type === 'holocron' ? 'holocron_v2'
+                : pk.type === 'bibo' ? 'bibo_v2' : null
+      if (!tex) continue
+      const img = useSprite(`pk_${pk.type}`, tex, 2.0)
+      // Center the pickup based on its draw radius (essence ~14, holocron ~22, bibo ~32)
+      const size = pk.type === 'essence' ? 28 : pk.type === 'holocron' ? 40 : 60
+      img.setPosition(pk.x + 7, pk.y + 7)
+      img.setDisplaySize(size, size)
+      // Gentle pulse for motes via scale modulation
+      if (pk.type === 'essence') {
+        const pulse = 0.95 + 0.15 * Math.sin(pk.glowPhase)
+        img.setScale(img.scale * pulse)
+      } else if (pk.type === 'holocron') {
+        img.setRotation(pk.glowPhase * 0.4)
+      }
+    }
+
+    // Obstacles
+    for (const ob of this.gs.obstacles) {
+      if (ob.type === 'slime') {
+        const img = useSprite('slime', 'slime_v2', 2.1)
+        img.setPosition(ob.x + ob.width / 2, ob.y + ob.height / 2 + 4)
+        img.setDisplaySize(ob.width + 22, ob.height + 18)
+      } else if (ob.type === 'mynock') {
+        const img = useSprite('mynock', 'mynock_v2', 2.2)
+        img.setPosition(ob.x + ob.width / 2, ob.y + ob.height / 2)
+        img.setDisplaySize(ob.width + 10, ob.height + 10)
+        // Wing flap via vertical scale wobble
+        const flap = 1 + 0.12 * Math.sin(this.gs.gameTime * 9 + ob.x * 0.01)
+        img.setScale(img.scaleX, img.scaleY * flap)
+      } else if (ob.type === 'vine' && (ob.dropped || ob.y > -ob.height)) {
+        const img = useSprite('vine', 'vine_v2', 2.0)
+        img.setOrigin(0.5, 0)
+        img.setPosition(ob.x + ob.width / 2, ob.y)
+        img.setDisplaySize(ob.width + 20, ob.height)
+      } else if (ob.type === 'vine_shadow' && ob.dropCountdown > 0) {
+        // Keep the shadow rendered as a Graphics blob (cheap, sells the warning)
+        const g = this.entityGfx
+        const pulse = 0.3 + 0.45 * Math.abs(Math.sin(this.time.now * 0.006))
+        const sc = Math.min(1, ob.dropCountdown)
+        g.fillStyle(0x000000, pulse * sc * 0.5)
+        g.fillEllipse(ob.x + ob.width / 2, ob.y + 4, ob.width * 0.9 * sc, 10 * sc)
+      }
+    }
   }
 
   private drawPlatform(g: Phaser.GameObjects.Graphics, pl: Platform): void {
