@@ -169,7 +169,7 @@ export class SwampScene extends Phaser.Scene {
     if (this.textures.exists('yoda_idle')) {
       this.playerImg = this.add.image(0, 0, 'yoda_idle')
         .setOrigin(0, 0)
-        .setDisplaySize(PLAYER_WIDTH * 2.0, PLAYER_HEIGHT * 2.0)
+        .setDisplaySize(PLAYER_WIDTH * 1.4, PLAYER_HEIGHT * 1.4)
         .setDepth(3)
         .setVisible(false)
     }
@@ -274,8 +274,27 @@ export class SwampScene extends Phaser.Scene {
     const tGY = Math.round(h * 0.74)
     if (Math.abs(this.gs.groundY - tGY) > 10) this.gs.groundY = tGY
 
+    // Track pre-physics pickup state for collection feedback
+    const preCollected = this.gs.pickupsCollected
+    const preEssence = this.gs.player.x // capture player x for spawn anchor
+
     // Physics
     updatePhysics(this.gs, dt, w, h)
+
+    // Pickup collection feedback (mote/holocron/bibo)
+    if (this.gs.pickupsCollected > preCollected) {
+      const delta = this.gs.pickupsCollected - preCollected
+      // Find the most-recently-collected pickup near the player to anchor the burst
+      const player = this.gs.player
+      let burstX = player.x, burstY = player.screenY + 20
+      for (const pk of this.gs.pickups) {
+        if (pk.collected && Math.abs(pk.x - preEssence) < 80) {
+          burstX = pk.x + 7; burstY = pk.y + 7
+          break
+        }
+      }
+      this.spawnPickupBurst(burstX, burstY, delta)
+    }
 
     // Run cycle timer
     if (this.gs.player.anim === 'running') {
@@ -368,6 +387,46 @@ export class SwampScene extends Phaser.Scene {
   }
 
   // ── Background ────────────────────────────────────────────────────────────
+
+  /**
+   * Spawn visual feedback when a pickup is collected:
+   * golden particle burst + floating "+1" text that fades upward.
+   */
+  private spawnPickupBurst(x: number, y: number, count: number): void {
+    // Particle burst
+    if (this.textures.exists('glow_pt')) {
+      const burst = this.add.particles(x, y, 'glow_pt', {
+        speed: { min: 80, max: 220 },
+        angle: { min: 0, max: 360 },
+        scale: { start: 1.4, end: 0 },
+        alpha: { start: 1, end: 0 },
+        tint: [0xffe040, 0xffaa20, 0xfff080, 0xffffff],
+        lifespan: 480,
+        quantity: 14,
+        emitting: false,
+      }).setDepth(4)
+      burst.explode(14)
+      this.time.delayedCall(700, () => burst.destroy())
+    }
+    // Floating +N text
+    const text = `+${count}`
+    const popup = this.add.text(x, y, text, {
+      fontFamily: 'Cinzel, serif',
+      fontSize: '24px',
+      color: '#ffe040',
+      stroke: '#3a2010',
+      strokeThickness: 4,
+      fontStyle: 'bold',
+    }).setOrigin(0.5).setDepth(5)
+    this.tweens.add({
+      targets: popup,
+      y: y - 40,
+      alpha: 0,
+      duration: 700,
+      ease: 'Cubic.Out',
+      onComplete: () => popup.destroy(),
+    })
+  }
 
   private renderBackground(w: number, _h: number): void {
     const g = this.bgGfx; g.clear()
@@ -766,7 +825,7 @@ export class SwampScene extends Phaser.Scene {
   private renderPlayer(): void {
     const g = this.playerGfx; g.clear()
     const p = this.gs.player
-    const PW = PLAYER_WIDTH * 2.0, PH = PLAYER_HEIGHT * 2.0
+    const PW = PLAYER_WIDTH * 1.4, PH = PLAYER_HEIGHT * 1.4
     const px = p.x - PW / 2
     // Apply bob offset for idle run; anchor bottom to state position
     const bobY = p.anim === 'running' ? -this.bobOffset : 0
