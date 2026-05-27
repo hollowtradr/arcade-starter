@@ -16,7 +16,7 @@
 
 const API_BASE: string =
   (import.meta.env.VITE_ARCADE_API_URL as string | undefined) ??
-  'https://babyyoda-bot.vercel.app'
+  'https://babyyoda-bot.fly.dev'
 
 // ── URL param helpers ────────────────────────────────────────────────────────
 
@@ -155,7 +155,7 @@ export function initSDK(): void {
   _gameId =
     getParam('game_id') ||
     (import.meta.env.VITE_ARCADE_GAME_ID as string | undefined) ||
-    'starter_dev'
+    'swamp_runner'
 }
 
 /** Validate session token and fetch player context. Caches proof_of_play_token. */
