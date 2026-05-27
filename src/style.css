@@ -325,20 +325,22 @@ html, body {
   padding: 5px 12px;
 }
 
-.hud-midi-icon { font-size: 12px; }
+.hud-midi-icon { font-size: 14px; }
 
 .hud-midi-val {
   font-family: 'Cinzel Decorative', serif;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--gold);
 }
 
 .hud-midi-label {
-  font-size: 9px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--text-muted);
+  color: var(--gold);
+  opacity: 0.85;
+  font-weight: 600;
 }
 
 /* ── Result Screen ───────────────────────────────────────── */

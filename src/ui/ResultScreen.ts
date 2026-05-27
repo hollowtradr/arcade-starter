@@ -158,13 +158,30 @@ function renderResultData(result: sdk.SDKResponse<ResultData>): void {
 
   if (!result.success) {
     if (midiEl) {
-      // Mock response for local dev / no session token
-      midiEl.innerHTML = `
-        <span class="midi-mock">+?? midi</span>
-        <div class="midi-note">
-          Connect via @stickergalaxybot for real rewards
-        </div>
-      `
+      const errMsg = (result.error || '').toLowerCase()
+      // Show real explanation for known errors instead of cryptic '+?? midi'
+      if (errMsg.includes('daily limit')) {
+        midiEl.innerHTML = `
+          <span class="midi-mock">Daily Cap Reached</span>
+          <div class="midi-note">
+            You've used today's 3 plays. Comes back fresh tomorrow.
+          </div>
+        `
+      } else if (errMsg.includes('no session') || errMsg.includes('unauthorized')) {
+        midiEl.innerHTML = `
+          <span class="midi-mock">Demo Mode</span>
+          <div class="midi-note">
+            Connect via the Sticker Galaxy mini-app for real midi rewards.
+          </div>
+        `
+      } else {
+        midiEl.innerHTML = `
+          <span class="midi-mock">Midi Pending</span>
+          <div class="midi-note">
+            ${result.error || 'Could not record the result. Try Run Again.'}
+          </div>
+        `
+      }
     }
     return
   }
