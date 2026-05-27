@@ -833,8 +833,9 @@ export class SwampScene extends Phaser.Scene {
     // Apply bob offset for idle run; anchor bottom to state position
     const bobY = p.anim === 'running' ? -this.bobOffset : 0
     // Sprite alpha bbox has empty padding below the planted foot when other foot is lifted;
-    // compensate so the planted foot visually touches ground.
-    const groundOffset = p.anim === 'running' ? PH * 0.08 : 0
+    // compensate so the planted foot visually touches ground. Also Egor sticker has padding
+    // below the figure baseline that bbox includes.
+    const groundOffset = p.anim === 'running' || p.anim === 'jumping' ? PH * 0.15 : PH * 0.10
     const py = p.screenY - (PH - PLAYER_HEIGHT) + bobY + groundOffset
 
     // Shield
