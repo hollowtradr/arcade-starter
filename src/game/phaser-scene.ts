@@ -1,0 +1,688 @@
+/**
+ * src/game/phaser-scene.ts — Phaser 3 scene for Swamp Runner
+ *
+ * Replaces render.ts. Owns all rendering via Phaser Graphics objects
+ * (cleared + redrawn each frame). Physics still run through the existing
+ * state.ts / physics.ts / spawn.ts pipeline — Phaser is the renderer only.
+ *
+ * Key improvements over the Canvas2D version:
+ *  1. HUD overlap FIXED: banner renders at 40% screen height (always below score card)
+ *  2. Player scales 1.5× with idle bob + jump tilt Phaser tweens
+ *  3. Obstacles use high-contrast shapes with thick outlines (visible vs background)
+ *  4. Biome tint shifts every 500 paces: day → twilight → day (smooth lerp)
+ *  5. ParticleEmitter for ambient spores + firefly trails
+ */
+
+import Phaser from 'phaser'
+import {
+  type GameState,
+  type Obstacle,
+  type Pickup,
+  type Platform,
+  PLAYER_WIDTH,
+  PLAYER_HEIGHT,
+} from './state.js'
+import { updatePhysics, startJump, releaseJump } from './physics.js'
+import { tgHaptic } from '../tg.js'
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type GameEndCallback = (score: number, outcome: 'win' | 'loss') => void
+
+interface SceneInitData {
+  state: GameState
+  onEnd: GameEndCallback
+}
+
+// ── Biome colour palettes ─────────────────────────────────────────────────────
+
+const DAY = {
+  skyTop: 0xc8d898, skyMid: 0x7aaa58, skyLow: 0x3a6a2a,
+  bgTree: 0x2a5a28, fgTree: 0x1a4a1a,
+  groundTop: 0x5a8a38, groundBot: 0x3a6a28,
+  waterTop: 0x3a7a48, waterBot: 0x1a4a28,
+  grass: 0x4a7a28,
+}
+const TWIL = {
+  skyTop: 0x8855aa, skyMid: 0x5a3a7a, skyLow: 0x2a1a3a,
+  bgTree: 0x1a1a3a, fgTree: 0x0d0d22,
+  groundTop: 0x3a5a28, groundBot: 0x1a3a18,
+  waterTop: 0x1a2a3a, waterBot: 0x0d1a22,
+  grass: 0x2a4a18,
+}
+
+function lerp(a: number, b: number, t: number): number {
+  const ar = (a >> 16) & 0xff, ag = (a >> 8) & 0xff, ab = a & 0xff
+  const br = (b >> 16) & 0xff, bg = (b >> 8) & 0xff, bb = b & 0xff
+  return ((Math.round(ar + (br - ar) * t) << 16) |
+          (Math.round(ag + (bg - ag) * t) << 8) |
+           Math.round(ab + (bb - ab) * t))
+}
+
+// ── Scene ─────────────────────────────────────────────────────────────────────
+
+export class SwampScene extends Phaser.Scene {
+  // State references
+  private gs!: GameState
+  // @ts-ignore — held for future restart-on-game-over flows
+  private onEndCb!: GameEndCallback
+
+  // Graphics layers (cleared + redrawn every frame)
+  private bgGfx!: Phaser.GameObjects.Graphics
+  private groundGfx!: Phaser.GameObjects.Graphics
+  private entityGfx!: Phaser.GameObjects.Graphics
+  private playerGfx!: Phaser.GameObjects.Graphics
+  private hudGfx!: Phaser.GameObjects.Graphics
+
+  // Player sprite (loaded if /sprites/ exist, else drawn via playerGfx)
+  private playerImg: Phaser.GameObjects.Image | null = null
+
+  // Tween state
+  private bobTween: Phaser.Tweens.Tween | null = null
+  private bobOffset = 0  // driven by tween
+  private prevAnim = 'running'
+  private gameEndFired = false
+
+  // Run animation
+  private runTimer = 0
+
+  // Biome state
+  private biomeTint = 0       // 0=day, 1=twilight (interpolated)
+  private biomeTarget = 0
+  private lastBiomeZone = 0
+
+  // HUD text objects (persistent Phaser Text nodes)
+  // @ts-ignore — kept to mirror layout; HUD label may be re-enabled in v2
+  private scoreLabel!: Phaser.GameObjects.Text
+  private scoreValue!: Phaser.GameObjects.Text
+  private timeText!: Phaser.GameObjects.Text
+  private bannerText!: Phaser.GameObjects.Text
+  private boostText!: Phaser.GameObjects.Text
+
+  // Pre-generated tree positions (deterministic, stays stable between frames)
+  private readonly bgTrees = Array.from({ length: 12 }, (_, i) => ({
+    nx: i / 12 + 0.04, nh: 0.25 + (i * 0.137 % 0.15), nw: 0.04 + (i * 0.079 % 0.03),
+  }))
+  private readonly fgTrees = Array.from({ length: 8 }, (_, i) => ({
+    nx: i / 8 + 0.02, nh: 0.12 + (i * 0.113 % 0.08), nw: 0.055 + (i * 0.067 % 0.025),
+  }))
+
+  constructor() { super({ key: 'SwampScene' }) }
+
+  // ── Phaser lifecycle ──────────────────────────────────────────────────────
+
+  init(data: SceneInitData): void {
+    this.gs = data.state
+    this.onEndCb = data.onEnd
+    this.gameEndFired = false
+    this.biomeTint = 0; this.biomeTarget = 0; this.lastBiomeZone = 0
+    this.prevAnim = 'running'; this.bobOffset = 0
+  }
+
+  preload(): void {
+    // Silence 404s for missing sprites gracefully
+    this.load.on('loaderror', (_file: unknown) => { /* ignore */ })
+    this.load.image('yoda_idle',   '/sprites/yoda_idle.png')
+    this.load.image('yoda_jump',   '/sprites/yoda_jump.png')
+    this.load.image('yoda_hit',    '/sprites/yoda_hit.png')
+    this.load.image('yoda_defeat', '/sprites/yoda_defeat.png')
+  }
+
+  create(): void {
+    const { width: w, height: h } = this.scale
+
+    // Graphics layers (back-to-front ordering via depth)
+    this.bgGfx     = this.add.graphics().setDepth(0)
+    this.groundGfx = this.add.graphics().setDepth(1)
+    this.entityGfx = this.add.graphics().setDepth(2)
+    this.playerGfx = this.add.graphics().setDepth(4)
+    this.hudGfx    = this.add.graphics().setDepth(5)
+
+    // Player sprite (if assets loaded)
+    if (this.textures.exists('yoda_idle')) {
+      this.playerImg = this.add.image(0, 0, 'yoda_idle')
+        .setOrigin(0, 0)
+        .setDisplaySize(PLAYER_WIDTH * 1.5, PLAYER_HEIGHT * 1.5)
+        .setDepth(3)
+        .setVisible(false)
+    }
+
+    // ── Particle texture: glowing dot ─────────────────────────────────────
+    const ptg = this.make.graphics()
+    ptg.fillStyle(0xffffff, 1)
+    ptg.fillCircle(4, 4, 4)
+    ptg.generateTexture('glow_pt', 8, 8)
+    ptg.destroy()
+
+    // Spore ambient emitter (depth 0.5 = behind trees)
+    this.add.particles(0, 0, 'glow_pt', {
+      x: { min: 0, max: w },
+      y: { min: 20, max: Math.round(h * 0.65) },
+      speedX: { min: -65, max: -15 },
+      speedY: { min: -8, max: 8 },
+      scale: { start: 0.38, end: 0 },
+      alpha: { start: 0.45, end: 0 },
+      tint: [0x88ff88, 0xaaffaa, 0xddffaa, 0xaaffdd],
+      lifespan: 3500,
+      frequency: 230,
+      quantity: 1,
+    }).setDepth(0.5)
+
+    // Firefly emitter
+    this.add.particles(0, 0, 'glow_pt', {
+      x: { min: 0, max: w },
+      y: { min: Math.round(h * 0.25), max: Math.round(h * 0.65) },
+      speedX: { min: -18, max: 18 },
+      speedY: { min: -12, max: 12 },
+      scale: { start: 0.6, end: 0 },
+      alpha: { start: 0.88, end: 0 },
+      tint: [0x88ff44, 0xaaff88, 0xffff44, 0xaaffcc],
+      lifespan: 1800,
+      frequency: 480,
+      quantity: 1,
+    }).setDepth(0.5)
+
+    // ── HUD text objects ─────────────────────────────────────────────────
+    const td = 6
+    this.scoreLabel = this.add.text(20, 16, 'FORCE-PACES', {
+      fontSize: '9px',
+      fontFamily: "'Cinzel Decorative', Georgia, serif",
+      color: '#8a5a10',
+    }).setDepth(td)
+
+    this.scoreValue = this.add.text(20, 28, '0', {
+      fontSize: '22px',
+      fontFamily: "'Cinzel Decorative', Georgia, serif",
+      color: '#3a1a00',
+      fontStyle: 'bold',
+    }).setDepth(td)
+
+    this.timeText = this.add.text(w - 14, 16, '0:00', {
+      fontSize: '11px',
+      fontFamily: 'Fraunces, Georgia, serif',
+      color: '#c8dcc8',
+    }).setDepth(td).setOrigin(1, 0)
+
+    // Banner: positioned at 40% screen height so it never overlaps the score card
+    this.bannerText = this.add.text(w / 2, h * 0.40, '', {
+      fontSize: '14px',
+      fontFamily: "'IM Fell English', Georgia, serif",
+      fontStyle: 'italic',
+      color: '#5a3a0a',
+      align: 'center',
+      wordWrap: { width: 300 },
+    }).setDepth(td).setOrigin(0.5, 0.5).setVisible(false)
+
+    this.boostText = this.add.text(w / 2, 76, 'FORCE SPEED', {
+      fontSize: '9px',
+      fontFamily: "'Cinzel Decorative', Georgia, serif",
+      color: '#c8e6ff',
+    }).setDepth(td).setOrigin(0.5, 0).setVisible(false)
+
+    // ── Input ────────────────────────────────────────────────────────────
+    this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
+      try { (ptr.event as PointerEvent).preventDefault() } catch (_) {}
+      startJump(this.gs)
+      tgHaptic('impact_light')
+    })
+    this.input.on('pointerup',  () => releaseJump(this.gs))
+    this.input.on('pointerout', () => releaseJump(this.gs))
+
+    // ── Resize ───────────────────────────────────────────────────────────
+    this.scale.on('resize', (size: Phaser.Structs.Size) => {
+      this.gs.groundY = Math.round(size.height * 0.74)
+      this.timeText?.setPosition(size.width - 14, 16)
+      this.bannerText?.setPosition(size.width / 2, size.height * 0.40)
+    })
+
+    this.gs.groundY = Math.round(h * 0.74)
+    this.startBobTween()
+  }
+
+  update(_time: number, delta: number): void {
+    const dt = Math.min(delta / 1000, 0.05)
+    const { width: w, height: h } = this.scale
+
+    // Sync groundY
+    const tGY = Math.round(h * 0.74)
+    if (Math.abs(this.gs.groundY - tGY) > 10) this.gs.groundY = tGY
+
+    // Physics
+    updatePhysics(this.gs, dt, w, h)
+
+    // Run cycle timer
+    if (this.gs.player.anim === 'running') {
+      this.runTimer += dt
+      if (this.runTimer > 0.18) this.runTimer = 0
+    }
+
+    // Biome zone (swap every 500 paces)
+    const zone = Math.floor(this.gs.distance / 500)
+    if (zone !== this.lastBiomeZone) {
+      this.lastBiomeZone = zone
+      this.biomeTarget = zone % 2 === 1 ? 1 : 0
+    }
+    this.biomeTint += (this.biomeTarget - this.biomeTint) * Math.min(dt * 0.7, 1)
+
+    // Player anim transitions
+    this.syncPlayerAnim()
+
+    // Render layers
+    this.renderBackground(w, h)
+    this.renderGround(w, h)
+    this.renderEntities(w, h)
+    this.renderPlayer()
+    this.renderHUD(w, h)
+    this.updateHUDText(w, h)
+
+    // Game end
+    if (this.gs.phase === 'ended' && !this.gameEndFired) {
+      this.gameEndFired = true
+      tgHaptic('error')
+      this.time.delayedCall(800, () => {
+        const score = this.gs.score
+        this.game.events.emit('gameEnd', { score, outcome: score > 0 ? 'win' : 'loss' })
+      })
+    }
+  }
+
+  // ── Bob tween ─────────────────────────────────────────────────────────────
+
+  private startBobTween(): void {
+    this.stopBobTween()
+    const t = { v: 0 }
+    this.bobTween = this.tweens.add({
+      targets: t, v: 3.5,
+      duration: 260, yoyo: true, repeat: -1,
+      ease: 'Sine.easeInOut',
+      onUpdate: () => { this.bobOffset = t.v },
+    })
+  }
+
+  private stopBobTween(): void {
+    this.bobTween?.stop()
+    this.bobTween = null
+    this.bobOffset = 0
+  }
+
+  private syncPlayerAnim(): void {
+    const anim = this.gs.player.anim
+    if (anim === this.prevAnim) return
+    this.prevAnim = anim
+
+    // Swap sprite texture
+    if (this.playerImg) {
+      const tex = anim === 'jumping' && this.textures.exists('yoda_jump') ? 'yoda_jump'
+        : anim === 'hit'  && this.textures.exists('yoda_hit')    ? 'yoda_hit'
+        : anim === 'dead' && this.textures.exists('yoda_defeat') ? 'yoda_defeat'
+        : this.textures.exists('yoda_idle') ? 'yoda_idle' : null
+      if (tex) this.playerImg.setTexture(tex)
+    }
+
+    if (anim === 'running') {
+      this.startBobTween()
+    } else if (anim === 'jumping') {
+      this.stopBobTween()
+    } else if (anim === 'dead') {
+      this.stopBobTween()
+      if (this.playerImg) {
+        this.tweens.add({
+          targets: this.playerImg,
+          angle: 90, alpha: 0.55,
+          duration: 700, ease: 'Power2.easeIn',
+        })
+      }
+    }
+  }
+
+  // ── Background ────────────────────────────────────────────────────────────
+
+  private renderBackground(w: number, _h: number): void {
+    const g = this.bgGfx; g.clear()
+    const gY = this.gs.groundY
+    const t = this.biomeTint
+
+    // Sky bands (3 horizontal strips approximating a gradient)
+    g.fillStyle(lerp(DAY.skyTop, TWIL.skyTop, t), 1); g.fillRect(0, 0, w, gY * 0.4)
+    g.fillStyle(lerp(DAY.skyMid, TWIL.skyMid, t), 1); g.fillRect(0, gY * 0.4, w, gY * 0.4)
+    g.fillStyle(lerp(DAY.skyLow, TWIL.skyLow, t), 1); g.fillRect(0, gY * 0.8, w, gY * 0.22)
+
+    // Mist bands
+    g.fillStyle(0xb4dcb4, 0.055); g.fillRect(0, gY * 0.52, w, 50)
+    g.fillStyle(0xb4dcb4, 0.040); g.fillRect(0, gY * 0.64, w, 50)
+    g.fillStyle(0xb4dcb4, 0.025); g.fillRect(0, gY * 0.76, w, 50)
+
+    // BG trees (parallax 20%)
+    const bgOff = (this.gs.worldOffset * 0.20) % w
+    this.drawTreeLayer(g, this.bgTrees, w, gY, bgOff,     lerp(DAY.bgTree, TWIL.bgTree, t), 0.38, 0.15)
+    this.drawTreeLayer(g, this.bgTrees, w, gY, bgOff - w, lerp(DAY.bgTree, TWIL.bgTree, t), 0.38, 0.15)
+
+    // FG trees (parallax 55%)
+    const fgOff = (this.gs.worldOffset * 0.55) % w
+    this.drawTreeLayer(g, this.fgTrees, w, gY, fgOff,     lerp(DAY.fgTree, TWIL.fgTree, t), 0.15, 0.12)
+    this.drawTreeLayer(g, this.fgTrees, w, gY, fgOff - w, lerp(DAY.fgTree, TWIL.fgTree, t), 0.15, 0.12)
+  }
+
+  private drawTreeLayer(
+    g: Phaser.GameObjects.Graphics,
+    trees: { nx: number; nh: number; nw: number }[],
+    w: number, gY: number, offset: number,
+    color: number, topFrac: number, widthFrac: number,
+  ): void {
+    g.fillStyle(color, 1)
+    for (const tree of trees) {
+      const tx = tree.nx * w - offset
+      const tw = tree.nw * w * (widthFrac / 0.04)
+      const th = tree.nh * gY * (topFrac / 0.38)
+      // Layered mangrove silhouette (3 stacked triangles)
+      g.fillTriangle(tx, gY, tx - tw * 0.50, gY - th * 0.45, tx + tw * 0.50, gY - th * 0.45)
+      g.fillTriangle(tx, gY - th * 0.35, tx - tw * 0.42, gY - th * 0.70, tx + tw * 0.42, gY - th * 0.70)
+      g.fillTriangle(tx, gY - th * 0.62, tx - tw * 0.28, gY - th, tx + tw * 0.28, gY - th)
+    }
+  }
+
+  // ── Ground ────────────────────────────────────────────────────────────────
+
+  private renderGround(w: number, h: number): void {
+    const g = this.groundGfx; g.clear()
+    const gY = this.gs.groundY
+    const t = this.biomeTint
+
+    // Water
+    g.fillStyle(lerp(DAY.waterTop, TWIL.waterTop, t), 1); g.fillRect(0, gY, w, (h - gY) * 0.35)
+    g.fillStyle(lerp(DAY.waterBot, TWIL.waterBot, t), 1); g.fillRect(0, gY + (h - gY) * 0.35, w, (h - gY) * 0.65)
+
+    // Water ripples
+    g.lineStyle(1.5, 0x3ca064, Phaser.Math.Linear(0.18, 0.06, t))
+    for (let i = 0; i < 4; i++) {
+      const wy = gY + 10 + i * 14
+      const wOff = (this.gs.worldOffset * 0.3 + i * 40) % w
+      g.beginPath(); g.moveTo(-wOff % w, wy)
+      for (let x = 0; x < w + 60; x += 20) g.lineTo(x - (wOff % 60), wy + Math.sin(x * 0.05 + i) * 2)
+      g.strokePath()
+    }
+
+    // Ground strip
+    g.fillStyle(lerp(DAY.groundTop, TWIL.groundTop, t), 1); g.fillRect(0, gY - 8, w, 14)
+    g.fillStyle(lerp(DAY.groundBot, TWIL.groundBot, t), 1); g.fillRect(0, gY + 6, w, 10)
+
+    // Grass tufts
+    const spacing = w / 10, tuftOff = this.gs.worldOffset % spacing
+    g.fillStyle(lerp(DAY.grass, TWIL.grass, t), 1)
+    for (let i = 0; i < 12; i++) {
+      const tx = i * spacing - tuftOff
+      for (let gi = -2; gi <= 2; gi++) {
+        const gx = tx + gi * 3
+        g.fillTriangle(gx - 2, gY - 8, gx + 2, gY - 8, gx, gY - 18 - Math.abs(gi) * 2)
+      }
+    }
+  }
+
+  // ── Entities ──────────────────────────────────────────────────────────────
+
+  private renderEntities(w: number, h: number): void {
+    const g = this.entityGfx; g.clear()
+    for (const pl of this.gs.platforms) this.drawPlatform(g, pl)
+    for (const pk of this.gs.pickups) { if (!pk.collected) this.drawPickup(g, pk) }
+    for (const ob of this.gs.obstacles) this.drawObstacle(g, ob)
+
+    // Screen flash overlay
+    const fa = Math.max(0, this.gs.screenFlashTimer / 0.4) * 0.35
+    if (fa > 0) { g.fillStyle(0x64b4ff, fa); g.fillRect(0, 0, w, h) }
+  }
+
+  private drawPlatform(g: Phaser.GameObjects.Graphics, pl: Platform): void {
+    const { x, width: pw, height: ph, sinking, sinkOffset } = pl
+    const y = pl.y + sinkOffset
+    const log = sinking ? 0x5a3010 : 0x8a5830
+    const bark = sinking ? 0x3a1808 : 0x5c3812
+
+    g.fillStyle(log, 1); g.fillRoundedRect(x, y, pw, ph, 4)
+    g.lineStyle(2, bark, 1); g.strokeRoundedRect(x, y, pw, ph, 4)
+    g.lineStyle(1.5, bark, 0.8)
+    for (let i = 0; i < 4; i++) {
+      const lx = x + (i + 1) * (pw / 5)
+      g.beginPath(); g.moveTo(lx, y + 2); g.lineTo(lx, y + ph - 2); g.strokePath()
+    }
+    g.fillStyle(bark, 1)
+    g.fillEllipse(x + 6, y + ph / 2, 8, ph - 4)
+    g.fillEllipse(x + pw - 6, y + ph / 2, 8, ph - 4)
+    if (sinking) { g.lineStyle(2.5, 0xff6400, 0.75); g.strokeRoundedRect(x - 1, y - 1, pw + 2, ph + 2, 4) }
+  }
+
+  private drawObstacle(g: Phaser.GameObjects.Graphics, ob: Obstacle): void {
+    const { type, x, y, width: w, height: h } = ob
+    const gt = this.gs.gameTime
+    if (type === 'slime')       { this.drawSlime(g, x, y, w, h, gt); return }
+    if (type === 'mynock')      { this.drawMynock(g, x, y, w, h, gt); return }
+    if (type === 'vine' && (ob.dropped || y > -h)) { this.drawVine(g, x, y, w, h); return }
+    if (type === 'vine_shadow') { this.drawVineShadow(g, x, y, w, ob.dropCountdown) }
+  }
+
+  private drawSlime(g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number, gt: number): void {
+    const pulse = 1 + 0.1 * Math.sin(gt * 4)
+    const cx = x + w / 2, cy = y + h / 2 + 4
+    g.lineStyle(5, 0x22cc22, 0.35); g.strokeEllipse(cx, cy, (w + 10) * pulse, (h + 14) * pulse)
+    g.fillStyle(0x66dd22, 1);       g.fillEllipse(cx, cy, w * pulse, (h + 8) * pulse)
+    g.fillStyle(0xbbff55, 0.75);    g.fillEllipse(cx - w * 0.12, cy - h * 0.2, w * 0.4, h * 0.35)
+    g.lineStyle(3, 0x117700, 1);    g.strokeEllipse(cx, cy, w * pulse, (h + 8) * pulse)
+    // Eyes
+    g.fillStyle(0xffffff, 1); g.fillCircle(cx - 5, cy - 3, 4);   g.fillCircle(cx + 5, cy - 3, 4)
+    g.fillStyle(0x111111, 1); g.fillCircle(cx - 4, cy - 3, 2.5); g.fillCircle(cx + 6, cy - 3, 2.5)
+  }
+
+  private drawMynock(g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number, gt: number): void {
+    const cx = x + w / 2, cy = y + h / 2
+    const flap = Math.sin(gt * 9 + x * 0.01) * 0.35
+    const wY = cy - h * 0.3 - h * 0.22 * flap
+    // Wings (behind body)
+    g.fillStyle(0x5a1a3a, 0.9);       g.fillTriangle(cx, cy, cx - w * 0.52, wY, cx - w * 0.32, cy + h * 0.12)
+    g.lineStyle(1.5, 0x220d2a, 0.85); g.strokeTriangle(cx, cy, cx - w * 0.52, wY, cx - w * 0.32, cy + h * 0.12)
+    g.fillStyle(0x5a1a3a, 0.9);       g.fillTriangle(cx, cy, cx + w * 0.52, wY, cx + w * 0.32, cy + h * 0.12)
+    g.lineStyle(1.5, 0x220d2a, 0.85); g.strokeTriangle(cx, cy, cx + w * 0.52, wY, cx + w * 0.32, cy + h * 0.12)
+    // Body (over wings)
+    g.fillStyle(0x3a1a5a, 1);   g.fillEllipse(cx, cy, w * 0.38, h * 0.65)
+    g.lineStyle(2, 0x220d3a, 1); g.strokeEllipse(cx, cy, w * 0.38, h * 0.65)
+    // Red eyes
+    g.fillStyle(0xff2222, 1); g.fillCircle(cx - 5, cy - 3, 4.5); g.fillCircle(cx + 5, cy - 3, 4.5)
+    g.fillStyle(0xff9999, 1); g.fillCircle(cx - 4, cy - 4, 1.8); g.fillCircle(cx + 6, cy - 4, 1.8)
+  }
+
+  private drawVine(g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number): void {
+    const vx = x + w * 0.3, vw = w * 0.4
+    g.fillStyle(0x2d5a18, 1); g.fillRoundedRect(vx, y, vw, h, { tl: 0, tr: 0, bl: 4, br: 4 })
+    g.lineStyle(2.5, 0x0d2008, 1); g.strokeRoundedRect(vx, y, vw, h, { tl: 0, tr: 0, bl: 4, br: 4 })
+    for (let i = 0; i < 4; i++) {
+      const ly = y + (i + 1) * (h / 5), side = i % 2 === 0 ? -1 : 1
+      g.fillStyle(0x4a8a1a, 1); g.fillEllipse(x + w / 2 + side * 10, ly, 14, 8)
+      g.lineStyle(1, 0x2a5a08, 1); g.strokeEllipse(x + w / 2 + side * 10, ly, 14, 8)
+    }
+  }
+
+  private drawVineShadow(g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, countdown: number): void {
+    if (countdown <= 0) return
+    const pulse = 0.3 + 0.45 * Math.abs(Math.sin(this.time.now * 0.006))
+    const sc = Math.min(1, countdown)
+    g.fillStyle(0x000000, pulse * sc * 0.5)
+    g.fillEllipse(x + w / 2, y + 4, w * 0.9 * sc, 10 * sc)
+  }
+
+  private drawPickup(g: Phaser.GameObjects.Graphics, pk: Pickup): void {
+    const { type, x, y, glowPhase: ph } = pk
+    if (type === 'essence')  { this.drawEssence(g, x, y, ph);  return }
+    if (type === 'holocron') { this.drawHolocron(g, x, y, ph); return }
+    if (type === 'bibo')     { this.drawBibo(g, x, y, ph) }
+  }
+
+  private drawEssence(g: Phaser.GameObjects.Graphics, x: number, y: number, ph: number): void {
+    const glow = 0.5 + 0.5 * Math.sin(ph), r = 9 + 2.5 * Math.sin(ph * 1.3)
+    const cx = x + 7, cy = y + 7
+    g.lineStyle(4, 0x44ffaa, glow * 0.4); g.strokeCircle(cx, cy, r + 5)
+    g.fillStyle(0x88ffcc, 0.92); g.fillCircle(cx, cy, r)
+    g.fillStyle(0xeefff0, 0.95); g.fillCircle(cx - 2, cy - 2, r * 0.4)
+    g.lineStyle(2, 0x00bb66, 1); g.strokeCircle(cx, cy, r)
+    g.lineStyle(1.5, 0xccffe8, glow * 0.65)
+    g.beginPath(); g.moveTo(cx, cy - r - 4); g.lineTo(cx, cy + r + 4)
+    g.moveTo(cx - r - 4, cy); g.lineTo(cx + r + 4, cy); g.strokePath()
+  }
+
+  private drawHolocron(g: Phaser.GameObjects.Graphics, x: number, y: number, ph: number): void {
+    const cx = x + 11, cy = y + 11, rot = ph * 0.5
+    const s = Math.sin(rot), c = Math.cos(rot), hw = 10, hh = 10
+    g.lineStyle(5, 0x4488ff, 0.35); g.strokeRect(cx - hw - 3, cy - hh - 3, (hw + 3) * 2, (hh + 3) * 2)
+    const corners = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([rx, ry]) => ({
+      x: cx + rx! * c - ry! * s, y: cy + rx! * s + ry! * c,
+    }))
+    g.fillStyle(0x4499ff, 0.95); g.fillPoints(corners, true, true)
+    g.lineStyle(2, 0xaaddff, 1); g.strokePoints(corners, true, true)
+    g.fillStyle(0xddeeff, 1); g.fillCircle(cx, cy, 3.5)
+  }
+
+  private drawBibo(g: Phaser.GameObjects.Graphics, x: number, y: number, ph: number): void {
+    const cx = x + 20, cy = y + 15, bob = Math.sin(ph * 1.5) * 3
+    g.lineStyle(2.5, 0x88ccff, 0.6); g.strokeEllipse(cx + 5, cy + bob, 52, 36)
+    g.fillStyle(0x4a6a8a, 1); g.fillEllipse(cx, cy + bob, 36, 20)
+    g.lineStyle(1.5, 0x2a4a6a, 1); g.strokeEllipse(cx, cy + bob, 36, 20)
+    g.fillStyle(0x5a7a9a, 1); g.fillEllipse(cx + 14, cy - 4 + bob, 16, 14)
+    g.fillStyle(0xffffff, 1); g.fillCircle(cx + 17, cy - 5 + bob, 3)
+    g.fillStyle(0x222222, 1); g.fillCircle(cx + 17, cy - 5 + bob, 1.5)
+    g.fillStyle(0x3a5a7a, 1); g.fillTriangle(cx - 5, cy + bob, cx - 14, cy + 8 + bob, cx - 2, cy + 6 + bob)
+  }
+
+  // ── Player ────────────────────────────────────────────────────────────────
+
+  private renderPlayer(): void {
+    const g = this.playerGfx; g.clear()
+    const p = this.gs.player
+    const PW = PLAYER_WIDTH * 1.5, PH = PLAYER_HEIGHT * 1.5
+    const px = p.x - PW / 2
+    // Apply bob offset for idle run; anchor bottom to state position
+    const bobY = p.anim === 'running' ? -this.bobOffset : 0
+    const py = p.screenY - (PH - PLAYER_HEIGHT) + bobY
+
+    // Shield
+    if (p.shieldActive) {
+      const sp = 0.6 + 0.4 * Math.sin(this.gs.gameTime * 5)
+      g.lineStyle(3, 0x78c8ff, sp * 0.8)
+      g.strokeEllipse(p.x, p.screenY + PLAYER_HEIGHT / 2, PW * 0.9, PH * 0.7)
+    }
+
+    const alpha = p.hitFlashTimer > 0 ? (Math.sin(p.hitFlashTimer * 25) > 0 ? 1 : 0.2) : 1
+
+    if (this.playerImg) {
+      const angle = p.anim === 'jumping' ? (p.vy < 0 ? -12 : 8) : 0
+      this.playerImg
+        .setVisible(true)
+        .setPosition(px, py)
+        .setDisplaySize(PW, PH)
+        .setAlpha(alpha)
+        .setAngle(angle)
+    } else {
+      g.setAlpha(alpha)
+      this.drawFallbackYoda(g, p.x, py, p.anim, this.gs.gameTime, PW, PH)
+      g.setAlpha(1)
+    }
+  }
+
+  private drawFallbackYoda(
+    g: Phaser.GameObjects.Graphics,
+    cx: number, y: number, anim: string, gt: number, pw: number, ph: number,
+  ): void {
+    const bodyC = anim === 'dead' ? 0x888888 : anim === 'hit' ? 0xff6666 : 0x7ec850
+    const headC = anim === 'dead' ? 0xaaaaaa : 0xc8f080
+    const headR = ph * 0.20, bodyW = pw * 0.55, bodyH = ph * 0.42
+    const headY = y + headR + 4, bodyY = y + ph * 0.42
+
+    // Robe body
+    g.fillStyle(bodyC, 1); g.fillEllipse(cx, bodyY, bodyW, bodyH)
+    g.lineStyle(2, 0x334422, 0.7); g.strokeEllipse(cx, bodyY, bodyW, bodyH)
+
+    // Head
+    g.fillStyle(headC, 1); g.fillCircle(cx, headY, headR)
+    g.lineStyle(2, 0x334422, 0.7); g.strokeCircle(cx, headY, headR)
+
+    // Large Yoda ears
+    g.fillStyle(headC, 1)
+    g.fillTriangle(cx - headR, headY + 2, cx - headR * 1.8, headY - headR * 0.8, cx - headR * 0.4, headY - headR * 0.3)
+    g.fillTriangle(cx + headR, headY + 2, cx + headR * 1.8, headY - headR * 0.8, cx + headR * 0.4, headY - headR * 0.3)
+    g.lineStyle(1.5, 0x334422, 0.5)
+    g.strokeTriangle(cx - headR, headY + 2, cx - headR * 1.8, headY - headR * 0.8, cx - headR * 0.4, headY - headR * 0.3)
+    g.strokeTriangle(cx + headR, headY + 2, cx + headR * 1.8, headY - headR * 0.8, cx + headR * 0.4, headY - headR * 0.3)
+
+    // Eyes
+    if (anim === 'jumping') {
+      g.fillStyle(0x224422, 1)
+      g.fillCircle(cx - headR * 0.35, headY - headR * 0.1, headR * 0.18)
+      g.fillCircle(cx + headR * 0.35, headY - headR * 0.1, headR * 0.18)
+    } else {
+      g.lineStyle(2, 0x224422, 1)
+      const ey = headY - headR * 0.05
+      g.beginPath(); g.arc(cx - headR * 0.35, ey, headR * 0.15, 0.1, Math.PI - 0.1); g.strokePath()
+      g.beginPath(); g.arc(cx + headR * 0.35, ey, headR * 0.15, 0.1, Math.PI - 0.1); g.strokePath()
+    }
+
+    // Legs (run sway)
+    if (anim === 'running') {
+      const sway = Math.sin(gt * 8) * 3
+      g.fillStyle(bodyC, 0.65)
+      g.fillEllipse(cx - pw * 0.12 + sway, y + ph * 0.8, pw * 0.22, ph * 0.18)
+      g.fillEllipse(cx + pw * 0.12 - sway, y + ph * 0.8, pw * 0.22, ph * 0.18)
+    }
+  }
+
+  // ── HUD ───────────────────────────────────────────────────────────────────
+
+  private renderHUD(w: number, h: number): void {
+    const g = this.hudGfx; g.clear()
+    const { speedBoostActive, speedBoostTimer, banner, gameTime: _gt } = this.gs
+    void _gt
+
+    // Score card (top-left, fixed)
+    const bx = 12, by = 12, bW = 148, bH = 48
+    g.fillStyle(0xf0dca0, 0.88); g.fillRoundedRect(bx, by, bW, bH, 6)
+    g.lineStyle(1.5, 0xa07830, 0.75); g.strokeRoundedRect(bx, by, bW, bH, 6)
+    g.lineStyle(1, 0xa07830, 0.30);   g.strokeRoundedRect(bx + 3, by + 3, bW - 6, bH - 6, 4)
+
+    // Speed boost bar (below score card)
+    if (speedBoostActive) {
+      const barW = 100, barH = 6, barX = (w - barW) / 2, barY = by + bH + 8
+      g.fillStyle(0x000000, 0.4); g.fillRoundedRect(barX, barY, barW, barH, 3)
+      const fill = Math.min(1, speedBoostTimer / 2.0)
+      g.fillStyle(0x60b0ff, 0.9); g.fillRoundedRect(barX, barY, barW * fill, barH, 3)
+      this.boostText?.setPosition(w / 2, barY + barH + 3).setVisible(true)
+    } else {
+      this.boostText?.setVisible(false)
+    }
+
+    // Banner: FIXED at 40% screen height — always below the score card (which ends at y≈60)
+    if (banner?.timer && banner.timer > 0) {
+      const prog = banner.timer / banner.maxTime
+      const alpha = prog > 0.85 ? (1 - (prog - 0.85) / 0.15)
+        : prog < 0.15 ? prog / 0.15
+        : 1
+
+      const bbanW = Math.min(w - 40, 360), bbanH = 56
+      const bbanX = (w - bbanW) / 2
+      const bbanY = h * 0.40 - bbanH / 2  // centered at 40% = never overlaps top HUD
+
+      g.fillStyle(0xf0dca0, 0.96 * alpha); g.fillRoundedRect(bbanX, bbanY, bbanW, bbanH, 8)
+      g.lineStyle(2, 0xa07830, 0.9 * alpha); g.strokeRoundedRect(bbanX, bbanY, bbanW, bbanH, 8)
+      g.lineStyle(1, 0xa07830, 0.4 * alpha); g.strokeRoundedRect(bbanX + 4, bbanY + 4, bbanW - 8, bbanH - 8, 4)
+
+      this.bannerText
+        ?.setText(`"${banner.text}"`)
+        .setPosition(w / 2, bbanY + bbanH / 2)
+        .setAlpha(alpha)
+        .setVisible(true)
+    } else {
+      this.bannerText?.setVisible(false)
+    }
+  }
+
+  private updateHUDText(w: number, _h: number): void {
+    this.scoreValue?.setText(this.gs.score.toString())
+    const m = Math.floor(this.gs.gameTime / 60)
+    const s = Math.floor(this.gs.gameTime % 60).toString().padStart(2, '0')
+    this.timeText?.setText(`${m}:${s}`).setPosition(w - 14, 16)
+  }
+}
