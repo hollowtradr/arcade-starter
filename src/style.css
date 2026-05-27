@@ -75,9 +75,10 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-end;
-  overflow: hidden;
+  justify-content: center;
+  overflow-y: auto;
   transition: opacity 0.3s ease;
+  padding: max(40px, env(safe-area-inset-top)) 0 max(40px, env(safe-area-inset-bottom)) 0;
 }
 
 #title-screen.fade-out {
@@ -110,8 +111,7 @@ html, body {
   flex-direction: column;
   align-items: center;
   gap: 14px;
-  /* iOS Safari bottom bar can be 80-120px tall — pad generously. */
-  padding: 0 24px max(120px, calc(env(safe-area-inset-bottom) + 80px));
+  padding: 0 24px;
   width: 100%;
   max-width: 420px;
 }
@@ -358,8 +358,7 @@ html, body {
 .result-scroll {
   width: 100%;
   max-width: 400px;
-  /* iOS Safari bottom bar can be 80-120px tall — pad generously and respect safe-area. */
-  padding: 20px 20px max(120px, calc(env(safe-area-inset-bottom) + 80px));
+  padding: max(40px, env(safe-area-inset-top)) 20px max(40px, env(safe-area-inset-bottom)) 20px;
 }
 
 .result-scroll-inner {

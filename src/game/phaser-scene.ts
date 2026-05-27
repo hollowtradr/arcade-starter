@@ -850,16 +850,26 @@ export class SwampScene extends Phaser.Scene {
     if (this.playerImg) {
       const angle = p.anim === 'jumping' ? (p.vy < 0 ? -12 : 8) : 0
       // Walk-cycle frame swap: alternate idle/idle_b every 0.18s while running
-      if (p.anim === 'running' && this.textures.exists('yoda_idle_b')) {
-        const frame = Math.floor(this.gs.gameTime / 0.18) % 2 === 0 ? 'yoda_idle' : 'yoda_idle_b'
-        if (this.playerImg.texture.key !== frame) this.playerImg.setTexture(frame)
+      // Walk cycle: procedural lean + scale oscillation (gpt-image-2/gemini can't produce
+      // a true leg-swap mid-stride, so we fake it with body-bob + lean — same technique
+      // Crossy Road / Subway Surfers use for tiny mobile sprites).
+      let runAngle = angle
+      let runScaleX = 1
+      let runScaleY = 1
+      if (p.anim === 'running' && this.textures.exists('yoda_idle')) {
+        if (this.playerImg.texture.key !== 'yoda_idle') this.playerImg.setTexture('yoda_idle')
+        // Sine waves at 4Hz: lean ~6deg side to side, slight squash on each footfall
+        const phase = this.gs.gameTime * 4 * Math.PI
+        runAngle = Math.sin(phase) * 6
+        runScaleY = 1 - Math.abs(Math.cos(phase)) * 0.06  // squash on impact
+        runScaleX = 1 + Math.abs(Math.cos(phase)) * 0.04
       }
       this.playerImg
         .setVisible(true)
         .setPosition(px, py)
-        .setDisplaySize(PW, PH)
+        .setDisplaySize(PW * runScaleX, PH * runScaleY)
         .setAlpha(alpha)
-        .setAngle(angle)
+        .setAngle(p.anim === 'running' ? runAngle : angle)
     } else {
       g.setAlpha(alpha)
       this.drawFallbackYoda(g, p.x, py, p.anim, this.gs.gameTime, PW, PH)
