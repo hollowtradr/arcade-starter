@@ -77,8 +77,13 @@ export function refreshTierBadge(): void {
   const tier    = getHolderTier()
   const labelEl = document.getElementById('hud-tier-label')
   const tipEl   = document.getElementById('hud-tier-tooltip')
+  const badgeEl = document.getElementById('hud-tier-badge')
   if (labelEl) labelEl.textContent = TIER_LABELS[tier]
   if (tipEl)   tipEl.textContent   = TIER_TOOLTIPS[tier]
+  if (badgeEl) {
+    badgeEl.classList.remove('tier-initiate', 'tier-padawan', 'tier-knight', 'tier-master', 'tier-grandmaster')
+    badgeEl.classList.add(`tier-${tier}`)
+  }
 }
 
 // ── Visibility ────────────────────────────────────────────────────────────────

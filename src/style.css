@@ -310,6 +310,7 @@ html, body {
   right: 0;
   display: flex;
   align-items: center;
+  gap: 8px;
   padding: 10px 14px;
   pointer-events: none;
   z-index: 10;
@@ -631,3 +632,470 @@ html, body {
 
 .lb-name  { flex: 1; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lb-score { font-size: 13px; font-weight: 600; color: var(--text-muted); font-family: 'Cinzel Decorative', serif; }
+
+/* ── YODA Tier Perks & Monetization UI (v0.2.0) ─────────── */
+
+/* ─ HUD tier badge ────────────────────────────────────────── */
+.hud-tier-badge {
+  order: -1;                    /* sits LEFT of midi badge in flex row */
+  position: relative;           /* tooltip anchor */
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.40);
+  border: 1px solid rgba(144, 168, 120, 0.35);  /* silver default */
+  border-radius: 20px;
+  padding: 4px 10px;
+  pointer-events: auto;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.hud-tier-badge:hover,
+.hud-tier-badge:focus-visible {
+  border-color: rgba(212, 168, 32, 0.6);
+  box-shadow: 0 0 6px rgba(212, 168, 32, 0.2);
+}
+
+/* Tier modifier classes — toggled by HUD.ts via classList.add('tier-X') */
+.hud-tier-badge.tier-initiate {
+  border-color: rgba(144, 168, 120, 0.30);
+}
+
+.hud-tier-badge.tier-padawan {
+  border-color: rgba(240, 220, 160, 0.50);
+}
+
+.hud-tier-badge.tier-knight {
+  border-color: rgba(212, 168, 32, 0.70);
+  box-shadow: 0 0 8px rgba(212, 168, 32, 0.18);
+}
+
+.hud-tier-badge.tier-master {
+  border-color: rgba(144, 168, 120, 0.75);
+  box-shadow: 0 0 8px rgba(170, 234, 96, 0.22);
+}
+
+.hud-tier-badge.tier-grandmaster {
+  border-color: rgba(170, 234, 96, 0.80);
+  box-shadow: 0 0 14px rgba(170, 234, 96, 0.35);
+}
+
+.hud-tier-label {
+  font-family: 'Cinzel Decorative', serif;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--parchment);
+  white-space: nowrap;
+}
+
+.hud-tier-tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  background: linear-gradient(160deg, rgba(240, 220, 160, 0.97), rgba(210, 185, 120, 0.97));
+  border: 1px solid rgba(160, 120, 60, 0.6);
+  border-radius: 8px;
+  padding: 10px 12px;
+  width: 220px;
+  max-width: 80vw;
+  font-family: 'Fraunces', serif;
+  font-size: 12px;
+  color: var(--parchment-text);
+  line-height: 1.45;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+/* ─ Revive offer ──────────────────────────────────────────── */
+.revive-offer {
+  padding-top: 4px;
+}
+
+.revive-title {
+  font-family: 'Fraunces', 'Georgia', serif;
+  font-style: italic;
+  font-size: 20px;
+  color: var(--parchment);
+  text-align: center;
+  line-height: 1.3;
+  padding: 0 8px;
+}
+
+.revive-countdown-wrap {
+  width: 100%;
+  height: 5px;
+  background: var(--mud-dark);
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 10px 0 4px;
+}
+
+.revive-countdown-bar {
+  height: 100%;
+  width: 100%;
+  background: var(--accent-glow);
+  transition: width 0.1s linear;
+}
+
+.revive-timer-label {
+  font-family: 'Cinzel Decorative', serif;
+  font-size: 20px;
+  color: var(--gold);
+  text-align: center;
+  margin-bottom: 12px;
+  line-height: 1;
+}
+
+.revive-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.revive-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 100%;
+  padding: 14px 20px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(210, 185, 120, 0.45);
+  border-radius: var(--radius);
+  color: var(--gold);
+  font-family: 'Cinzel Decorative', serif;
+  font-size: 14px;
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.15s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.revive-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(212, 168, 32, 0.25);
+}
+
+.revive-btn:active {
+  transform: scale(0.97);
+}
+
+.revive-btn-free {
+  background: rgba(90, 200, 96, 0.18);
+  border-color: var(--success);
+  color: #fff;
+}
+
+.revive-btn-free:hover {
+  box-shadow: 0 4px 16px rgba(90, 200, 96, 0.3);
+}
+
+.revive-btn-sub {
+  font-family: 'Fraunces', serif;
+  font-size: 11px;
+  font-weight: 400;
+  font-style: italic;
+  opacity: 0.8;
+  margin-top: 3px;
+  display: block;
+}
+
+.revive-discount-badge {
+  position: absolute;
+  top: -8px;
+  right: 12px;
+  background: var(--success);
+  color: var(--mud-dark);
+  font-family: 'Fraunces', serif;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.revive-upsell {
+  font-family: 'IM Fell English', 'Georgia', serif;
+  font-style: italic;
+  font-size: 11px;
+  color: var(--parchment-dk);
+  text-align: center;
+  line-height: 1.45;
+  padding: 0 8px;
+}
+
+.revive-skip {
+  background: none;
+  border: none;
+  color: var(--parchment-dk);
+  font-family: 'Fraunces', serif;
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0.7;
+  padding: 4px 10px;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.revive-skip:hover {
+  opacity: 1;
+  color: var(--parchment-text);
+}
+
+/* ─ Daily-plays-exhausted card ────────────────────────────── */
+.daily-plays-card {
+  background: linear-gradient(135deg, rgba(240, 220, 160, 0.92), rgba(210, 185, 120, 0.92));
+  border: 1px solid rgba(42, 26, 10, 0.5);
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-top: 12px;
+  width: 100%;
+}
+
+.daily-plays-title {
+  font-family: 'Cinzel Decorative', serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--parchment-text);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.daily-plays-upgrade {
+  font-family: 'Fraunces', serif;
+  font-size: 12px;
+  color: var(--parchment-text);
+  line-height: 1.45;
+  margin-bottom: 6px;
+}
+
+.daily-plays-cta {
+  font-size: 12px;
+  padding: 8px 14px;
+  width: auto;
+  max-width: 100%;
+  display: inline-flex;
+}
+
+/* ─ Cosmetic shelf ────────────────────────────────────────── */
+.cosmetic-shelf {
+  width: 100%;
+  background: rgba(42, 26, 10, 0.72);
+  border: 1px solid rgba(240, 220, 160, 0.20);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cosmetic-shelf-label {
+  font-family: 'Fraunces', serif;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.cosmetic-shelf-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.cosmetic-shelf-name {
+  font-family: 'Cinzel Decorative', serif;
+  font-size: 13px;
+  color: var(--parchment);
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.cosmetic-shelf-ton {
+  font-family: 'Fraunces', serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gold);
+  white-space: nowrap;
+}
+
+.cosmetic-yoda-price {
+  font-family: 'Fraunces', serif;
+  font-size: 11px;
+  color: var(--silver);
+  white-space: nowrap;
+}
+
+.cosmetic-discount-badge {
+  background: var(--success);
+  color: var(--mud-dark);
+  font-family: 'Fraunces', serif;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.cosmetic-shelf-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  width: auto;
+  max-width: none;
+}
+
+/* ─ Onboarding modal ──────────────────────────────────────── */
+@keyframes onboarding-fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+.onboarding-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(13, 26, 16, 0.88);
+  backdrop-filter: blur(10px);
+  animation: onboarding-fade-in 0.3s ease both;
+  padding: 16px;
+}
+
+.onboarding-modal {
+  background: linear-gradient(160deg, rgba(240, 220, 160, 0.98), rgba(210, 185, 120, 0.98));
+  border: 2px solid var(--mud-dark);
+  border-radius: 10px;
+  padding: 24px;
+  width: 100%;
+  max-width: 340px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+  color: var(--parchment-text);
+}
+
+.onboarding-screen {
+  display: block;
+}
+
+.onboarding-title {
+  font-family: 'Cinzel Decorative', serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--parchment-text);
+  text-align: center;
+  margin-bottom: 14px;
+  line-height: 1.2;
+}
+
+.onboarding-sub {
+  font-family: 'Fraunces', 'Georgia', serif;
+  font-style: italic;
+  font-size: 13px;
+  color: rgba(90, 58, 10, 0.82);
+  text-align: center;
+  margin-bottom: 14px;
+  line-height: 1.45;
+}
+
+.onboarding-bullets {
+  list-style: none;
+  padding-left: 0;
+  margin-bottom: 14px;
+  font-family: 'Fraunces', serif;
+  font-size: 14px;
+  color: var(--parchment-text);
+  line-height: 1.5;
+}
+
+.onboarding-bullets li {
+  position: relative;
+  padding-left: 1.4em;
+  margin-bottom: 8px;
+}
+
+.onboarding-bullets li::before {
+  content: '✦';
+  position: absolute;
+  left: 0;
+  top: 2px;
+  color: var(--gold);
+  font-size: 12px;
+}
+
+.onboarding-tier-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-bottom: 14px;
+  background: rgba(42, 26, 10, 0.07);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.onboarding-tier-table th {
+  font-family: 'Cinzel Decorative', serif;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--parchment-text);
+  padding: 8px;
+  text-align: left;
+  background: rgba(42, 26, 10, 0.12);
+  border-bottom: 1px solid rgba(160, 120, 60, 0.35);
+}
+
+.onboarding-tier-table td {
+  font-family: 'Fraunces', serif;
+  padding: 7px 8px;
+  color: var(--parchment-text);
+  border-top: 1px solid rgba(160, 120, 60, 0.18);
+}
+
+.onboarding-tier-table tbody tr:first-child td {
+  border-top: none;
+}
+
+.onboarding-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.onboarding-actions .swamp-btn,
+.onboarding-actions .btn-primary {
+  max-width: 100%;
+  width: auto;
+  padding: 12px 20px;
+  font-size: 13px;
+}
+
+.onboarding-progress {
+  font-family: 'Fraunces', serif;
+  font-size: 11px;
+  color: rgba(90, 58, 10, 0.6);
+  text-align: center;
+  margin-top: 8px;
+}
+
+/* Dismissal animation applied by JS */
+.onboarding-exit {
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  pointer-events: none;
+}
